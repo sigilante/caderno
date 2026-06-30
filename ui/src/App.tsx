@@ -358,7 +358,9 @@ export default function App() {
                   style={{ flex: 1, height: 52, borderRadius: '0 26px 0 0', background: activeNb?.kernel === 'hoon' ? '#cc88ff' : '#2a1c34', color: activeNb?.kernel === 'hoon' ? '#000' : '#6a548a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 16, letterSpacing: '.1em' }}
                 >HOON</div>
               </div>
-              <div className="lc-press" onClick={onRunAll} style={{ height: 54, borderRadius: '0 30px 30px 0', background: '#cc88ff', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 17, letterSpacing: '.06em' }}>RUN ALL ▶</div>
+              {activeNb?.kernel === 'hoon' && (
+                <div className="lc-press" onClick={onRunAll} style={{ height: 54, borderRadius: '0 30px 30px 0', background: '#cc88ff', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 17, letterSpacing: '.06em' }}>RUN ALL ▶</div>
+              )}
               <div className="lc-press" onClick={onAddCode} style={{ height: 50, borderRadius: '0 30px 30px 0', background: '#6c8cff', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 16, letterSpacing: '.04em' }}>+ CODE</div>
               <div className="lc-press" onClick={onAddText} style={{ height: 50, borderRadius: '0 30px 30px 0', background: '#ff8866', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 16, letterSpacing: '.04em' }}>+ TEXT</div>
               <div className="lc-press" onClick={onBack} style={{ height: 50, borderRadius: '0 30px 30px 0', background: '#d9a441', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 16, letterSpacing: '.04em' }}>◂ INDEX</div>
@@ -435,7 +437,7 @@ export default function App() {
 }
 
 function RightRail({ channelOpen, kelvins }: { channelOpen: boolean; kelvins: Kelvins | null }) {
-  const kv = kelvins ?? { zuse: 420, arvo: 240, hoon: 140, nock: 4, port: parseInt(window.location.port) || 80 }
+  const kv = kelvins ?? { zuse: 409, arvo: 235, hoon: 136, nock: 4, port: parseInt(window.location.port) || 80 }
   return (
     <div style={{ position: 'absolute', top: 116, right: 10, bottom: 10, width: 156, display: 'flex', flexDirection: 'column', gap: 7, fontFamily: "'JetBrains Mono', monospace" }}>
       {/* KELVIN */}

@@ -80,3 +80,37 @@ Once merged and deployed, kernel discovery works everywhere without any local pa
 - **Cell reordering** — drag-and-drop or move up/down buttons
 - **Export** — serialize notebook to `.ipynb`-compatible JSON or a Hoon file
 - **Shared notebooks** — subscribe to another ship's `/notebook` path
+
+---
+
+## Phase 4: Distribution
+
+### Philosophy
+
+Notebooks should travel the same paths as Urbit apps. The two-layer model:
+
+1. **Clay desk subscription** — v1 distribution. A ship publishes a `notebooks` desk; other ships subscribe to get a live-synced copy. Caderno's existing Clay sync already writes notebooks as JSON files, so the publishing half is nearly done. Subscribers get the notebook read-only; mutations are local forks.
+
+2. **Gall subscription** — v2, real-time collaboration. Caderno already broadcasts mutations on `/notebook`. A remote ship's caderno subscribes to `/notebook/<name>` on a publisher and receives diffs as they happen. The UI exposes this as "follow" (live mirror) vs. "fork" (take a local copy).
+
+### Notebook Explorer
+
+Discovery is the missing piece. A thin companion agent — separate from caderno — indexes notebook metadata from ships you follow and exposes a browsable directory:
+
+- Subscribes to a `/notebook-index` path on trusted ships (sponsor, contacts, groups)
+- Collects `[title tags kernel author]` metadata tuples
+- Exposes a scry endpoint that the Caderno UI reads to render the explorer pane
+- One-click **subscribe** (Gall follow) or **install** (Clay desk pull)
+
+The explorer mirrors Landscape's app grid: your social graph seeds the trust layer; caderno handles execution once you've chosen a notebook.
+
+### Implementation sketch
+
+```
+/app/caderno-explorer.hoon   companion agent; manages remote subscriptions & index
+/sur/caderno-index.hoon      shared types: notebook-meta, index-update
+/app/caderno.hoon            gains %publish / %unpublish actions + /notebook-index watch path
+```
+
+Publish flow: `%publish` action marks a notebook public, writes metadata to `/notebook-index`, and opens the path to remote subscribers.  
+Subscribe flow: explorer agent subscribes to a remote `/notebook-index`; user picks a notebook; caderno issues a Clay `%pull` or a Gall subscription depending on whether they want a snapshot or live updates.

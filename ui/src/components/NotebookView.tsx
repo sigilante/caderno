@@ -241,7 +241,7 @@ function CellRow({ cell, isRunning, onRun, onDelete, onInsert, onUpdateSrc, onTo
   )
 }
 
-// ── markdown renderer (ported from prototype) ─────────────────────────────────
+// ── markdown renderer ──────────────────────────────────────────────────────────
 
 function renderMd(src: string, accent: string): string {
   const esc = (x: string) => x.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -249,32 +249,56 @@ function renderMd(src: string, accent: string): string {
     .replace(/\*\*([^*]+)\*\*/g, `<b style="color:${accent};font-weight:700">$1</b>`)
     .replace(/`([^`]+)`/g, `<code style="font-family:'JetBrains Mono',monospace;background:#1d1712;color:${accent};padding:1px 6px;border-radius:4px;font-size:.84em">$1</code>`)
     .replace(/\*([^*]+)\*/g, '<i style="color:#e9c9a0">$1</i>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, `<a href="$2" style="color:${accent};text-decoration:underline" target="_blank" rel="noopener">$1</a>`)
 
   const lines = src.split('\n')
   let html = ''
-  let inUl = false
-  const close = () => { if (inUl) { html += '</ul>'; inUl = false } }
+  let inUl = false, inOl = false, inCode = false
+  let codeLines: string[] = []
+
+  const closeUl = () => { if (inUl) { html += '</ul>'; inUl = false } }
+  const closeOl = () => { if (inOl) { html += '</ol>'; inOl = false } }
+  const closeLists = () => { closeUl(); closeOl() }
+  const flushCode = () => {
+    html += `<pre style="margin:8px 0;background:#1d1712;border-radius:6px;padding:10px 14px;overflow-x:auto"><code style="font-family:'JetBrains Mono',monospace;font-size:.84em;color:#ffd9a8;line-height:1.5">${codeLines.map(esc).join('\n')}</code></pre>`
+    codeLines = []
+  }
 
   for (const ln of lines) {
-    if (/^### /.test(ln)) {
-      close()
-      html += `<div style="font-family:Antonio,sans-serif;text-transform:uppercase;letter-spacing:.05em;color:${accent};font-size:17px;font-weight:600;margin:14px 0 5px">${inl(ln.replace(/^### /, ''))}</div>`
+    if (/^```/.test(ln)) {
+      if (!inCode) { closeLists(); inCode = true; codeLines = [] }
+      else { flushCode(); inCode = false }
+    } else if (inCode) {
+      codeLines.push(ln)
+    } else if (/^### /.test(ln)) {
+      closeLists()
+      html += `<div style="font-family:Antonio,sans-serif;text-transform:uppercase;letter-spacing:.05em;color:${accent};font-size:17px;font-weight:600;margin:14px 0 5px">${inl(ln.slice(4))}</div>`
     } else if (/^## /.test(ln)) {
-      close()
-      html += `<div style="font-family:Antonio,sans-serif;text-transform:uppercase;letter-spacing:.04em;color:${accent};font-size:23px;font-weight:600;margin:18px 0 7px">${inl(ln.replace(/^## /, ''))}</div>`
+      closeLists()
+      html += `<div style="font-family:Antonio,sans-serif;text-transform:uppercase;letter-spacing:.04em;color:${accent};font-size:23px;font-weight:600;margin:18px 0 7px">${inl(ln.slice(3))}</div>`
     } else if (/^# /.test(ln)) {
-      close()
-      html += `<div style="font-family:Antonio,sans-serif;text-transform:uppercase;letter-spacing:.03em;color:${accent};font-size:33px;font-weight:700;line-height:1;margin:4px 0 10px">${inl(ln.replace(/^# /, ''))}</div>`
+      closeLists()
+      html += `<div style="font-family:Antonio,sans-serif;text-transform:uppercase;letter-spacing:.03em;color:${accent};font-size:33px;font-weight:700;line-height:1;margin:4px 0 10px">${inl(ln.slice(2))}</div>`
     } else if (/^[-*] /.test(ln)) {
+      closeOl()
       if (!inUl) { html += '<ul style="margin:5px 0;padding-left:20px">'; inUl = true }
-      html += `<li style="margin:3px 0;line-height:1.45">${inl(ln.replace(/^[-*] /, ''))}</li>`
+      html += `<li style="margin:3px 0;line-height:1.45">${inl(ln.slice(2))}</li>`
+    } else if (/^\d+\. /.test(ln)) {
+      closeUl()
+      if (!inOl) { html += '<ol style="margin:5px 0;padding-left:20px">'; inOl = true }
+      html += `<li style="margin:3px 0;line-height:1.45">${inl(ln.replace(/^\d+\. /, ''))}</li>`
+    } else if (/^> /.test(ln)) {
+      closeLists()
+      html += `<blockquote style="margin:7px 0;padding:4px 12px;border-left:3px solid ${accent};color:#c0a882;font-style:italic">${inl(ln.slice(2))}</blockquote>`
     } else if (ln.trim() === '') {
-      close()
+      closeLists()
     } else {
-      close()
+      closeLists()
       html += `<p style="margin:7px 0;line-height:1.5">${inl(ln)}</p>`
     }
   }
-  close()
+
+  if (inCode) flushCode()
+  closeLists()
   return html
 }

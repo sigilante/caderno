@@ -78,6 +78,170 @@
   ?>  ?=(^ ns)
   p.n.ns
 
+++  hoon-school-nbs
+  ^-  (map @t notebook)
+  %-  ~(gas by *(map @t notebook))
+  :~
+    :-  'hs-syntax'
+    ^-  notebook
+    :+  ^-  (list cell)
+        :~
+          :*  id=1  type=%markdown
+              source=(crip "# 1. Hoon Syntax\0a\0aEvery Hoon expression produces a **noun**: either an **atom** (unsigned integer) or a **cell** (pair of nouns).")
+              outputs=~  exec-count=~
+          ==
+          :*  id=2  type=%markdown
+              source=(crip "## Atoms and Auras\0a\0aAtoms carry **auras** that control display format:\0a- `@ud` unsigned decimal\0a- `@ux` hexadecimal\0a- `@ub` binary\0a- `@p` ship name\0a- `@t` UTF-8 text (cord)")
+              outputs=~  exec-count=~
+          ==
+          [3 %code '`@ub`32' ~ ~]
+          [4 %code '`@ux`255' ~ ~]
+          [5 %code '^-  @ux  0x1ab4' ~ ~]
+          :*  id=6  type=%markdown
+              source=(crip "## Cells\0a\0aCells are pairs `[a b]`. Nesting is right-associative: `[1 2 3]` = `[1 [2 3]]`.")
+              outputs=~  exec-count=~
+          ==
+          [7 %code '[1 2]' ~ ~]
+          [8 %code '[[1 2] 3]' ~ ~]
+          [9 %code '[1 2 3]' ~ ~]
+          :*  id=10  type=%markdown
+              source=(crip "## Runes\0a\0aHoon uses two-character ASCII **runes** as keywords. Each has a tall form (newlines) and wide form (parens):\0a\0a- `:-` colhep -- build cell\0a- `%-` cenhep -- call gate\0a- `=/` tisfas -- bind name\0a- `^-` kethep -- type cast\0a- `?:` wutcol -- if/then/else")
+              outputs=~  exec-count=~
+          ==
+          [11 %code ':-  1  2' ~ ~]
+          [12 %code '(add 1 2)' ~ ~]
+          [13 %code '%-  sub  [5 1]' ~ ~]
+          :*  id=14  type=%markdown
+              source=(crip "## Faces\0a\0a`=/  name  value  expr` binds a **face** (name) to a value in scope for `expr`.")
+              outputs=~  exec-count=~
+          ==
+          [15 %code (crip "=/  perfect-number  28\0a(add perfect-number 10)") ~ ~]
+          :*  id=16  type=%markdown
+              source=(crip "## Lists\0a\0aLists are null-terminated cells. `~[1 2 3]` is sugar for `[1 [2 [3 ~]]]`.")
+              outputs=~  exec-count=~
+          ==
+          [17 %code '~[1 2 3]' ~ ~]
+          [18 %code (crip "`(list @ud)`[1 2 3 ~]") ~ ~]
+          :*  id=19  type=%markdown
+              source=(crip "## Branching\0a\0a`?:  condition  if-true  if-false` is Hoon's if/then/else.")
+              outputs=~  exec-count=~
+          ==
+          [20 %code (crip "=/  x  10\0a?:  (gte x 10)\0a  'yes'\0a'no'") ~ ~]
+        ==
+      %hoon
+    'Hoon School: 1. Syntax'
+    :-  'hs-azimuth'
+    ^-  notebook
+    :+  ^-  (list cell)
+        :~
+          :*  id=1  type=%markdown
+              source=(crip "# 2. Azimuth (Urbit ID)\0a\0aAzimuth is Urbit's public-key infrastructure on Ethereum. Every ship has a cryptographic identity called a **point**, displayed with the `@p` aura.")
+              outputs=~  exec-count=~
+          ==
+          :*  id=2  type=%markdown
+              source=(crip "## The Address Space\0a\0a| Rank | Size | Example |\0a|------|------|---------|\0a| Galaxy | 256 | `~zod`, `~fes` |\0a| Star | ~65K | `~marzod` |\0a| Planet | ~4B | `~sampel-palnet` |\0a| Moon | 2^64 | `~doznec-sampel` |\0a\0aThe `@p` mnemonic names come from 256 prefix + 256 suffix syllables.")
+              outputs=~  exec-count=~
+          ==
+          [3 %code '`@p`0' ~ ~]
+          [4 %code '`@p`255' ~ ~]
+          [5 %code (crip "`@ud`~sampel-palnet") ~ ~]
+          :*  id=6  type=%markdown
+              source=(crip "## Address Arithmetic\0a\0aSince `@p` values are unsigned integers, you can do arithmetic on them. Galaxies are 0-255, stars 256-65535, planets 65536 and above.")
+              outputs=~  exec-count=~
+          ==
+          [7 %code (crip "`@p`(add `@ud`~zod 1)") ~ ~]
+          [8 %code (crip "`@p`(sub `@ud`~sampel-palnet 1)") ~ ~]
+          :*  id=9  type=%markdown
+              source=(crip "## Sponsors\0a\0aEvery planet is sponsored by a star; every star by a galaxy. Subtract 2^16 (65,536) from a planet to find its sponsoring star.\0a\0a> `(sein:title our now point)` works in dojo where `our` and `now` are in scope.")
+              outputs=~  exec-count=~
+          ==
+          [10 %code (crip ":: Star sponsoring ~sampel-palnet\0a`@p`(sub `@ud`~sampel-palnet 65.536)") ~ ~]
+          [11 %code (crip ":: A moon of ~sampel-palnet (add 2^32)\0a`@p`(add `@ud`~sampel-palnet 4.294.967.296)") ~ ~]
+        ==
+      %hoon
+    'Hoon School: 2. Azimuth'
+    :-  'hs-gates'
+    ^-  notebook
+    :+  ^-  (list cell)
+        :~
+          :*  id=1  type=%markdown
+              source=(crip "# 3. Gates (Functions)\0a\0aA **gate** is Hoon's function. Build one with `|=` (bartis): it takes a **sample** (typed input) and produces a **product** (return value).")
+              outputs=~  exec-count=~
+          ==
+          :*  id=2  type=%markdown
+              source=(crip "## Sugar Syntax\0a\0aMany Hoon runes have short irregular equivalents:\0a\0a| Tall form | Sugar | Meaning |\0a|-----------|-------|---------|\0a| `:-  a  b` | `[a b]` | cell |\0a| `%-  f  x` | `(f x)` | call gate |\0a| `` ^-  t  v `` | `` `t`v `` | cast |\0a| `%+  f  a  b` | `(f a b)` | 2-arg call |")
+              outputs=~  exec-count=~
+          ==
+          [3 %code '(add 1 2)' ~ ~]
+          [4 %code '%-  add  [1 2]' ~ ~]
+          [5 %code (crip "`@p`255") ~ ~]
+          [6 %code '^-  @p  255' ~ ~]
+          :*  id=7  type=%markdown
+              source=(crip "## Building a Gate\0a\0a`|=  sample=type  body` -- the sample declares the input name and type; the body is the return expression.")
+              outputs=~  exec-count=~
+          ==
+          [8 %code (crip "=/  double  |=(a=@ud (mul a 2))\0a(double 5)") ~ ~]
+          [9 %code (crip "=/  bigger  |=([a=@ud b=@ud] ?:((gth a b) a b))\0a(bigger 7 3)") ~ ~]
+          :*  id=10  type=%markdown
+              source=(crip "## Type Fences\0a\0a`^-  type  expr` asserts the return type. This is checked at compile time -- a mismatch is a build error, not a runtime crash.")
+              outputs=~  exec-count=~
+          ==
+          [11 %code (crip "=/  greet\0a  |=  a=@ud\0a  ^-  @t\0a  ?:  (gth a 1)  'yes'  'no'\0a(greet 5)") ~ ~]
+          :*  id=12  type=%markdown
+              source=(crip "## Recursion with `|-`\0a\0a`|-` (barhep) creates an anonymous recursive gate. Call it again with `$`.")
+              outputs=~  exec-count=~
+          ==
+          [13 %code (crip ":: Triangular number: 1+2+...+n\0a=/  tri\0a  |=  n=@ud\0a  ^-  @ud\0a  =/  i  1\0a  =/  acc  0\0a  |-\0a  ?:  (gth i n)  acc\0a  $(i (add i 1), acc (add acc i))\0a(tri 10)") ~ ~]
+        ==
+      %hoon
+    'Hoon School: 3. Gates'
+    :-  'hs-types'
+    ^-  notebook
+    :+  ^-  (list cell)
+        :~
+          :*  id=1  type=%markdown
+              source=(crip "# 4. Molds (Types)\0a\0aHoon is statically typed with inference. A **mold** is both a type and a normalizing gate. `^-` asserts a type; a mismatch produces a `nest-fail`.")
+              outputs=~  exec-count=~
+          ==
+          :*  id=2  type=%markdown
+              source=(crip "## Atoms and Auras\0a\0aAll atoms are unsigned integers. Auras annotate them for display but don't create separate runtime types. Arithmetic strips auras, producing plain `@`.")
+              outputs=~  exec-count=~
+          ==
+          [3 %code '^-  @ud  15' ~ ~]
+          [4 %code '^-  *  [13 14]' ~ ~]
+          [5 %code (crip "(add 0x15 15)     :: hex + decimal: auras erased, result is @") ~ ~]
+          [6 %code (crip "(add 100 0b101)   :: decimal + binary = 105") ~ ~]
+          :*  id=7  type=%markdown
+              source=(crip "## Cell Types\0a\0a`^` is any cell. `[@ @]` requires a pair of atoms. `[@ud @ux]` specifies the aura of each slot.")
+              outputs=~  exec-count=~
+          ==
+          [8 %code '^-  ^  [12 13]' ~ ~]
+          [9 %code '^-  [@ @]  [12 13]' ~ ~]
+          [10 %code '^-  [@ud @ux]  [12 0x10]' ~ ~]
+          :*  id=11  type=%markdown
+              source=(crip "## Bunts\0a\0a`^*  type` (or `*type`) gives the **bunt** -- the default value of a mold. Used when you need a placeholder of the right shape.")
+              outputs=~  exec-count=~
+          ==
+          [12 %code '^*  @ud' ~ ~]
+          [13 %code '^*  @da' ~ ~]
+          [14 %code '*[@ud @ux @ub]' ~ ~]
+          :*  id=15  type=%markdown
+              source=(crip "## Vases\0a\0a`!>  expr` (zapgar) wraps a value in a **vase** `[type value]`. Use `-:!>(x)` to extract just the type label.")
+              outputs=~  exec-count=~
+          ==
+          [16 %code '!>(0xace2.bead)' ~ ~]
+          [17 %code '-:!>(0xace2.bead)' ~ ~]
+          [18 %code (crip "-:!>('hello')") ~ ~]
+          :*  id=19  type=%markdown
+              source=(crip "## Type Unions\0a\0a`$?` (bucwut) builds a union mold. Use `?-` (wuthep) to switch on a union value -- it must be exhaustive.")
+              outputs=~  exec-count=~
+          ==
+          [20 %code (crip "=/  color  `?(%red %green %blue)`%red\0a?-  color\0a  %red    'is red'\0a  %green  'is green'\0a  %blue   'is blue'\0a==") ~ ~]
+        ==
+      %hoon
+    'Hoon School: 4. Molds'
+  ==
+
 ++  nbs-to-soba
   ::  Build Clay soba (file mutations) for writing all notebooks as JSON text.
   |=  ns=(map @t notebook)
@@ -182,13 +346,7 @@
 
 ++  on-init
   ^-  (quip card _this)
-  =/  blank  ^-  notebook
-    :*  cells=~
-        kernel=%hoon
-        title='untitled'
-    ==
-  =/  init-nbs  (~(put by *(map @t notebook)) 'main' blank)
-  `this(nbs init-nbs, active 'main', ksession ~, counter 0, hoon-subject fresh-subject)
+  `this(nbs hoon-school-nbs, active 'hs-syntax', ksession ~, counter 100, hoon-subject fresh-subject)
 
 ++  on-save  !>(`versioned-state`[%4 nbs active ksession counter hoon-subject])
 
@@ -473,7 +631,7 @@
           ['arvo' [%n (scot %ud arvo-kel)]]
           ['zuse' [%n (scot %ud zuse-kel)]]
           ['nock' [%n '4']]
-          ['port' [%n (scot %ud port)]]
+          ['port' (numb:enjs:format port)]
       ==
     ``[%json !>(kels)]
   ==
