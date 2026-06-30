@@ -26,7 +26,7 @@ export type Update =
   | { 'state': { nb: Notebook } }
   | { 'cell-output': { id: number; out: Output } }
   | { 'cell-status': { id: number; status: CellStatus } }
-  | { 'cell-added': { c: Cell } }
+  | { 'cell-added': { after: number | null; c: Cell } }
   | { 'cell-deleted': { id: number } }
 
 let channelId = `caderno-${Date.now()}`
@@ -42,7 +42,7 @@ async function channelPut(actions: object[]) {
   })
 }
 
-export async function openChannel(onUpdate: (upd: Update) => void) {
+export async function openChannel(onUpdate: (upd: Update) => void, onOpen?: () => void) {
   // subscribe to /notebook
   await channelPut([{
     id: messageId++,
@@ -53,6 +53,7 @@ export async function openChannel(onUpdate: (upd: Update) => void) {
   }])
 
   eventSource = new EventSource(`/~/channel/${channelId}`, { withCredentials: true })
+  if (onOpen) eventSource.onopen = onOpen
   eventSource.onmessage = (e) => {
     try {
       const msg = JSON.parse(e.data)

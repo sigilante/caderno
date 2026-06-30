@@ -76,7 +76,7 @@ type Action =
   | { type: 'loaded'; nb: Notebook }
   | { type: 'cell-output'; id: number; out: Output }
   | { type: 'cell-status'; id: number; status: string }
-  | { type: 'cell-added'; cell: Cell }
+  | { type: 'cell-added'; cell: Cell; after: number | null }
   | { type: 'cell-deleted'; id: number }
   | { type: 'channel-open' }
   | { type: 'error'; msg: string }
@@ -113,7 +113,14 @@ function reducer(state: AppState, action: Action): AppState {
     case 'cell-added': {
       const nb = activeNb(); if (!nb) return state
       const ce = cellToEntry(action.cell)
-      return mutNb(state, nb.id, n => ({ ...n, cells: [...n.cells, ce] }))
+      // New markdown cells start in edit mode so the textarea is immediately visible
+      const ce2 = ce.type === 'markdown' ? { ...ce, editing: true } : ce
+      return mutNb(state, nb.id, n => ({
+        ...n,
+        cells: action.after == null
+          ? [...n.cells, ce2]
+          : insertAfterCell(n.cells, action.after, ce2),
+      }))
     }
     case 'cell-deleted': {
       const nb = activeNb(); if (!nb) return state
@@ -161,6 +168,12 @@ function mutCells(state: AppState, cellId: number, fn: (c: CellEntry) => CellEnt
   return mutNb(state, nb.id, n => ({ ...n, cells: n.cells.map(c => c.id === cellId ? fn(c) : c) }))
 }
 
+function insertAfterCell(cells: CellEntry[], after: number, newCell: CellEntry): CellEntry[] {
+  const idx = cells.findIndex(c => c.id === after)
+  if (idx === -1) return [...cells, newCell]
+  return [...cells.slice(0, idx + 1), newCell, ...cells.slice(idx + 1)]
+}
+
 // ── component ────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -174,7 +187,7 @@ export default function App() {
     if ('state' in upd)           dispatch({ type: 'loaded', nb: upd['state'].nb })
     else if ('cell-output' in upd)   dispatch({ type: 'cell-output', id: upd['cell-output'].id, out: upd['cell-output'].out })
     else if ('cell-status' in upd)   dispatch({ type: 'cell-status', id: upd['cell-status'].id, status: upd['cell-status'].status })
-    else if ('cell-added' in upd)    dispatch({ type: 'cell-added', cell: upd['cell-added'].c })
+    else if ('cell-added' in upd)    dispatch({ type: 'cell-added', cell: upd['cell-added'].c, after: upd['cell-added'].after })
     else if ('cell-deleted' in upd)  dispatch({ type: 'cell-deleted', id: upd['cell-deleted'].id })
   }, [])
 
@@ -182,10 +195,7 @@ export default function App() {
     fetchNotebook()
       .then(nb => dispatch({ type: 'loaded', nb }))
       .catch(() => dispatch({ type: 'error', msg: 'Could not reach ship' }))
-    openChannel(upd => {
-      dispatch({ type: 'channel-open' })
-      handleUpdate(upd)
-    })
+    openChannel(handleUpdate, () => dispatch({ type: 'channel-open' }))
     return () => { closeChannel() }
   }, [handleUpdate])
 
@@ -201,13 +211,31 @@ export default function App() {
   const onNewNb = () => dispatch({ type: 'new-nb' })
   const onOpen = (id: string) => dispatch({ type: 'set-view', view: 'nb', id })
 
-  const onRunCell = (id: number) => { actions.runCell(id) }
+  const srcDebounce = useRef(new Map<number, ReturnType<typeof setTimeout>>())
+
+  const onRunCell = useCallback((id: number) => {
+    const nb = stateRef.current.notebooks.find(n => n.id === stateRef.current.active)
+    const cell = nb?.cells.find(c => c.id === id)
+    if (cell?.type === 'markdown') {
+      dispatch({ type: 'toggle-edit', id })
+    } else {
+      actions.runCell(id)
+    }
+  }, [])
+
   const onDelete = (id: number) => { actions.deleteCell(id) }
   const onInsertAfter = (id: number) => { actions.insertCell(id, 'code') }
-  const onUpdateSrc = (id: number, src: string) => {
+
+  const onUpdateSrc = useCallback((id: number, src: string) => {
     dispatch({ type: 'set-src', id, src })
-    actions.updateSource(id, src)
-  }
+    const prev = srcDebounce.current.get(id)
+    if (prev !== undefined) clearTimeout(prev)
+    srcDebounce.current.set(id, setTimeout(() => {
+      actions.updateSource(id, src)
+      srcDebounce.current.delete(id)
+    }, 400))
+  }, [])
+
   const onToggleEdit = (id: number) => dispatch({ type: 'toggle-edit', id })
 
   const stardate = toStardate(Date.now())

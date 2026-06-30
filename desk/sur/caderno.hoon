@@ -38,7 +38,7 @@
   $%  [%state nb=notebook]
       [%cell-output id=cell-id out=output]
       [%cell-status id=cell-id status=?(%running %done %error)]
-      [%cell-added c=cell]
+      [%cell-added after=(unit cell-id) c=cell]
       [%cell-deleted id=cell-id]
   ==
 

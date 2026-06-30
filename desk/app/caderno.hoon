@@ -94,7 +94,7 @@
       %cell-added
     :-  %o
     %-  ~(gas by *(map @t json))
-    ~[['cell-added' [%o (~(gas by *(map @t json)) ~[['c' (cell-to-json c.upd)]])]]]
+    ~[['cell-added' [%o (~(gas by *(map @t json)) ~[['after' ?~(after.upd ~ [%n (scot %ud u.after.upd)])] ['c' (cell-to-json c.upd)]])]]]
       %cell-deleted
     :-  %o
     %-  ~(gas by *(map @t json))
@@ -315,7 +315,7 @@
         (insert-after-cell u.after.act new-cell cells.nb)
       =/  new-nb  nb(cells new-cells)
       :_  this(nb new-nb, counter +(counter))
-      ~[(broadcast [%cell-added new-cell])]
+      ~[(broadcast [%cell-added after.act new-cell])]
     ::
         %delete-cell
       =/  id  id.act
