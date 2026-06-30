@@ -23,8 +23,9 @@ export interface Notebook {
 export type CellStatus = 'running' | 'done' | 'error'
 
 export type Update =
-  | { 'state': { nb: Notebook } }
-  | { 'cell-output': { id: number; out: Output } }
+  | { 'state': { id: string; nb: Notebook } }
+  | { 'nb-list': { id: string; title: string }[] }
+  | { 'cell-output': { id: number; out: Output; count: number } }
   | { 'cell-status': { id: number; status: CellStatus } }
   | { 'cell-added': { after: number | null; c: Cell } }
   | { 'cell-deleted': { id: number } }
@@ -69,21 +70,27 @@ export async function closeChannel() {
   await channelPut([{ id: messageId++, action: 'delete' }])
 }
 
-async function poke(data: object) {
-  await channelPut([{
+function mkPoke(data: object) {
+  return {
     id: messageId++,
-    action: 'poke',
-    ship: (window as any).ship ?? 'nec',
+    action: 'poke' as const,
+    ship: ((window as any).ship ?? 'nec') as string,
     app: 'caderno',
-    mark: 'caderno-action',
+    mark: 'cnb-action',
     json: data,
-  }])
+  }
 }
 
-export async function fetchNotebook(): Promise<Notebook> {
+async function poke(data: object) {
+  await channelPut([mkPoke(data)])
+}
+
+export async function fetchActiveNotebook(): Promise<{ id: string; nb: Notebook }> {
   const res = await fetch('/~/scry/caderno/notebook/json', { credentials: 'include' })
   return res.json()
 }
+
+export interface Kelvins { hoon: number; arvo: number; zuse: number; nock: number; port: number }
 
 export async function fetchSoleSessions(agent: string): Promise<string[] | null> {
   try {
@@ -95,8 +102,16 @@ export async function fetchSoleSessions(agent: string): Promise<string[] | null>
   }
 }
 
+export async function fetchKelvins(): Promise<Kelvins> {
+  const res = await fetch('/~/scry/caderno/kelvins/json', { credentials: 'include' })
+  return res.json()
+}
+
 export const actions = {
   runCell: (id: number) => poke({ 'run-cell': { id } }),
+  // Send update-source + run-cell in one PUT so the backend always evals fresh source.
+  runCellFlushed: (id: number, src: string) =>
+    channelPut([mkPoke({ 'update-source': { id, src } }), mkPoke({ 'run-cell': { id } })]),
   runAll: () => poke({ 'run-all': null }),
   insertCell: (after: number | null, type: 'code' | 'markdown') =>
     poke({ 'insert-cell': { after, type } }),
@@ -105,4 +120,9 @@ export const actions = {
     poke({ 'update-source': { id, src } }),
   setKernel: (kernel: string) => poke({ 'set-kernel': { kernel } }),
   resetSubject: () => poke({ 'reset-subject': null }),
+  setCellType: (id: number, type: 'code' | 'markdown') => poke({ 'set-cell-type': { id, type } }),
+  setTitle: (title: string) => poke({ 'set-title': { title } }),
+  newNotebook: () => poke({ 'new-notebook': null }),
+  switchNotebook: (id: string) => poke({ 'switch-notebook': { id } }),
+  deleteNotebook: (id: string) => poke({ 'delete-notebook': { id } }),
 }

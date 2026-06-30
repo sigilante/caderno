@@ -1,20 +1,32 @@
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, useState } from 'react'
 import type { NbEntry, CellEntry } from '../App'
 
 interface Props {
   nb: NbEntry
+  running: Set<number>
   onRunCell: (id: number) => void
   onDelete: (id: number) => void
   onInsertAfter: (id: number) => void
   onUpdateSrc: (id: number, src: string) => void
   onToggleEdit: (id: number) => void
   onAddCode: () => void
+  onSetCellType: (id: number, cellType: 'code' | 'markdown') => void
+  onRename: (title: string) => void
 }
 
-export function NotebookView({ nb, onRunCell, onDelete, onInsertAfter, onUpdateSrc, onToggleEdit, onAddCode }: Props) {
+export function NotebookView({ nb, running, onRunCell, onDelete, onInsertAfter, onUpdateSrc, onToggleEdit, onAddCode, onSetCellType, onRename }: Props) {
   const codeCells = nb.cells.filter(c => c.type === 'code')
   const okCount   = codeCells.filter(c => c.out?.ok).length
   const errCount  = codeCells.filter(c => c.out && !c.out.ok).length
+
+  const [editingTitle, setEditingTitle] = useState(false)
+  const [titleDraft, setTitleDraft] = useState(nb.name)
+  useEffect(() => { if (!editingTitle) setTitleDraft(nb.name) }, [nb.name, editingTitle])
+
+  const commitTitle = () => {
+    setEditingTitle(false)
+    if (titleDraft !== nb.name) onRename(titleDraft)
+  }
 
   return (
     <div
@@ -24,7 +36,26 @@ export function NotebookView({ nb, onRunCell, onDelete, onInsertAfter, onUpdateS
       <div style={{ padding: '2px 24px 80px' }}>
         {/* title row */}
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, padding: '0 4px 12px', borderBottom: '1px solid #1a1814', marginBottom: 16 }}>
-          <span style={{ fontFamily: "'Antonio', sans-serif", fontSize: 28, fontWeight: 600, color: '#ffd9a8' }}>{nb.name}</span>
+          {editingTitle ? (
+            <input
+              value={titleDraft}
+              onChange={e => setTitleDraft(e.target.value)}
+              onBlur={commitTitle}
+              onKeyDown={e => {
+                if (e.key === 'Enter') commitTitle()
+                if (e.key === 'Escape') { setEditingTitle(false); setTitleDraft(nb.name) }
+              }}
+              autoFocus
+              style={{ fontFamily: "'Antonio', sans-serif", fontSize: 28, fontWeight: 600, color: '#ffd9a8', background: 'transparent', border: 'none', borderBottom: '1px solid #ffd9a880', outline: 'none', minWidth: 120 }}
+            />
+          ) : (
+            <span
+              className="lc-press"
+              onClick={() => { setTitleDraft(nb.name); setEditingTitle(true) }}
+              title="click to rename"
+              style={{ fontFamily: "'Antonio', sans-serif", fontSize: 28, fontWeight: 600, color: '#ffd9a8', cursor: 'text' }}
+            >{nb.name}</span>
+          )}
           <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#6b5a3c', letterSpacing: '.16em' }}>
             {codeCells.length} CODE · {okCount} OK · {errCount} ERR
           </span>
@@ -42,11 +73,13 @@ export function NotebookView({ nb, onRunCell, onDelete, onInsertAfter, onUpdateS
           <CellRow
             key={cell.id}
             cell={cell}
+            isRunning={running.has(cell.id)}
             onRun={() => onRunCell(cell.id)}
             onDelete={() => onDelete(cell.id)}
             onInsert={() => onInsertAfter(cell.id)}
             onUpdateSrc={(src) => onUpdateSrc(cell.id, src)}
             onToggleEdit={() => onToggleEdit(cell.id)}
+            onToggleType={() => onSetCellType(cell.id, cell.type === 'code' ? 'markdown' : 'code')}
           />
         ))}
 
@@ -65,20 +98,24 @@ export function NotebookView({ nb, onRunCell, onDelete, onInsertAfter, onUpdateS
 
 interface CellRowProps {
   cell: CellEntry
+  isRunning: boolean
   onRun: () => void
   onDelete: () => void
   onInsert: () => void
   onUpdateSrc: (src: string) => void
   onToggleEdit: () => void
+  onToggleType: () => void
 }
 
-function cellStateBg(cell: CellEntry): string {
+function cellStateBg(cell: CellEntry, isRunning: boolean): string {
+  if (isRunning) return '#6c8cff'
   if (cell.type === 'markdown') return '#d9a441'
   if (!cell.out) return '#5f6b7a'
   return cell.out.ok ? '#9bb267' : '#cc5a3a'
 }
 
-function cellStateWord(cell: CellEntry): string {
+function cellStateWord(cell: CellEntry, isRunning: boolean): string {
+  if (isRunning) return 'EXEC'
   if (cell.type === 'markdown') return 'TEXT'
   if (!cell.out) return 'IDLE'
   return cell.out.ok ? 'RUN' : 'FAIL'
@@ -89,7 +126,7 @@ function cellInLabel(cell: CellEntry): string {
   return cell.count != null ? 'IN ' + cell.count : 'IN ··'
 }
 
-function CellRow({ cell, onRun, onDelete, onInsert, onUpdateSrc, onToggleEdit }: CellRowProps) {
+function CellRow({ cell, isRunning, onRun, onDelete, onInsert, onUpdateSrc, onToggleEdit, onToggleType }: CellRowProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // auto-height
@@ -105,8 +142,8 @@ function CellRow({ cell, onRun, onDelete, onInsert, onUpdateSrc, onToggleEdit }:
     }
   }
 
-  const stateBg   = cellStateBg(cell)
-  const stateWord = cellStateWord(cell)
+  const stateBg   = cellStateBg(cell, isRunning)
+  const stateWord = cellStateWord(cell, isRunning)
   const inLabel   = cellInLabel(cell)
 
   return (
@@ -129,6 +166,7 @@ function CellRow({ cell, onRun, onDelete, onInsert, onUpdateSrc, onToggleEdit }:
               value={cell.src}
               onChange={e => onUpdateSrc(e.target.value)}
               onKeyDown={onKey}
+              autoFocus={!!cell.fresh}
               style={{ fontSize: 15, color: '#ffd9a8' }}
             />
             {cell.out && (
@@ -186,6 +224,12 @@ function CellRow({ cell, onRun, onDelete, onInsert, onUpdateSrc, onToggleEdit }:
           title="insert code below"
           style={{ width: 34, height: 28, borderRadius: 14, background: '#23211c', color: '#6c8cff', border: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, cursor: 'pointer' }}
         >+</button>
+        <button
+          className="lc-press"
+          onClick={onToggleType}
+          title={cell.type === 'code' ? 'switch to markdown' : 'switch to code'}
+          style={{ width: 34, height: 28, borderRadius: 14, background: '#23211c', color: cell.type === 'code' ? '#d9a441' : '#6c8cff', border: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace", letterSpacing: '.04em', fontWeight: 700 }}
+        >{cell.type === 'code' ? 'TXT' : 'COD'}</button>
         <button
           className="lc-press"
           onClick={onDelete}

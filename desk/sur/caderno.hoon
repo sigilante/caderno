@@ -32,11 +32,17 @@
       [%update-source id=cell-id src=@t]
       [%set-kernel kernel=@tas]
       [%reset-subject ~]
+      [%set-cell-type id=cell-id type=cell-type]
+      [%set-title title=@t]
+      [%new-notebook ~]
+      [%switch-notebook id=@t]
+      [%delete-notebook id=@t]
   ==
 
 +$  update
-  $%  [%state nb=notebook]
-      [%cell-output id=cell-id out=output]
+  $%  [%state id=@t nb=notebook]
+      [%nb-list items=(list [id=@t title=@t])]
+      [%cell-output id=cell-id out=output count=@ud]
       [%cell-status id=cell-id status=?(%running %done %error)]
       [%cell-added after=(unit cell-id) c=cell]
       [%cell-deleted id=cell-id]
@@ -46,9 +52,8 @@
 +$  kernel-session
   $:  agent=@tas
       ses=@ta
-      own=@ud
-      his=@ud
-      pending=(unit cell-id)
+      pending=(unit [id=cell-id src=@t])
       accum=(list @t)
+      ready=?
   ==
 --
