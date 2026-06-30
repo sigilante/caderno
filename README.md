@@ -2,10 +2,12 @@
 
 A Hoon notebook for Urbit — Jupyter-style cells backed by a live ship.
 
+![](./demo.jpeg)
+
 ## Kernels
 
 - **Hoon** — built-in, evaluates cells directly via `slap`
-- **North** (`%north`) — Forth REPL via shoe session
+- **North** (`%north`) — [Nock Forth](https://github.com/sigilante/north) REPL via shoe session
 - **Dojo** (`%dojo`) — standard Dojo REPL via shoe session
 - **Other** — any agent built on `/lib/shoe` can be used as a kernel
 
