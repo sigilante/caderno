@@ -78,6 +78,15 @@
   ?>  ?=(^ ns)
   p.n.ns
 
+++  nbs-to-soba
+  ::  Build Clay soba (file mutations) for writing all notebooks as JSON text.
+  |=  ns=(map @t notebook)
+  ^-  (list [path miso:clay])
+  %+  turn  ~(tap by ns)
+  |=  [id=@t nb=notebook]
+  :-  (welp /notebook `path`[`@ta`id /txt])
+  `miso:clay`[%ins `cage`[%txt !>(~[(en:json:html (update-to-json [%state id nb]))])]]
+
 ++  update-to-json
   |=  upd=update
   ^-  json
@@ -106,6 +115,10 @@
     :-  %o
     %-  ~(gas by *(map @t json))
     ~[['cell-deleted' [%o (~(gas by *(map @t json)) ~[['id' [%n (scot %ud id.upd)]]])]]]
+      %log-mounted
+    [%o (~(gas by *(map @t json)) ~[['log-mounted' [%b %.y]]])]
+      %log-committed
+    [%o (~(gas by *(map @t json)) ~[['log-committed' [%b %.y]]])]
   ==
 
 ++  broadcast
@@ -379,6 +392,39 @@
       :~  (broadcast [%nb-list (nb-list-items new-nbs)])
           (broadcast [%state new-active new-active-nb])
       ==
+        %mount-log
+      ::  create %caderno-log desk and mount it to unix (idempotent)
+      =/  all-desks  .^((set desk) %cd (en-beam [[our.bowl %$ [%da now.bowl]] /]))
+      ?:  (~(has in all-desks) %caderno-log)
+        :_  this
+        ~[(broadcast [%log-mounted ~])]
+      ::  read bootstrap files from %base
+      =/  base-paths=(list path)
+        :~  /mar/noun/hoon  /mar/hoon/hoon  /mar/txt/hoon
+            /mar/kelvin/hoon  /mar/json/hoon  /sys/kelvin
+        ==
+      =/  init-files=(map path page:clay)
+        %-  ~(gas by *(map path page:clay))
+        %+  turn  base-paths
+        |=  =path
+        :-  path
+        ^-  page:clay
+        [(rear path) .^(* %cx (en-beam [[our.bowl %base [%da now.bowl]] path]))]
+      =/  make-desk=note-arvo  (new-desk:cloy %caderno-log ~ init-files)
+      =/  log-bem=beam  [[our.bowl %caderno-log [%da now.bowl]] /]
+      :_  this
+      :~  [%pass /caderno/hood/pass %agent [our.bowl %hood] %poke %helm-pass !>(make-desk)]
+          [%pass /caderno/hood/mount %agent [our.bowl %hood] %poke %kiln-mount !>([(en-beam log-bem) %caderno-log])]
+          (broadcast [%log-mounted ~])
+      ==
+        %commit-log
+      ::  write all notebooks as JSON text to %caderno-log and commit
+      =/  soba  (nbs-to-soba nbs)
+      :_  this
+      :~  [%pass /caderno/clay %arvo %c [%info %caderno-log [%& soba]]]
+          [%pass /caderno/hood/commit %agent [our.bowl %hood] %poke %kiln-commit !>([%caderno-log %.n])]
+          (broadcast [%log-committed ~])
+      ==
     ==
   ==
 
@@ -407,6 +453,9 @@
       %-  ~(gas by *(map @t json))
       ~[['id' [%s active]] ['nb' (notebook-to-json nb)]]
     ``[%json !>(res)]
+      [%x %log-status ~]
+    =/  all-desks  .^((set desk) %cd (en-beam [[our.bowl %$ [%da now.bowl]] /]))
+    ``[%json !>([%b (~(has in all-desks) %caderno-log)])]
       [%x %kelvins ~]
     =/  hoon-kel  +>:..add
     =/  arvo-kel  arvo.arvo
@@ -514,9 +563,22 @@
       %-  (slog leaf+"caderno: eval failed" u.p.sign)
       `this
     ==
+      [%caderno %hood *]
+    ?+  -.sign  `this
+        %poke-ack
+      ?~  p.sign  `this
+      %-  (slog leaf+"caderno: hood poke failed" u.p.sign)
+      `this
+    ==
   ==
 
-++  on-arvo  on-arvo:def
+++  on-arvo
+  |=  [=wire =sign-arvo]
+  ^-  (quip card _this)
+  ?+  wire  (on-arvo:def wire sign-arvo)
+      [%caderno %clay ~]
+    `this
+  ==
 
 ++  on-fail   on-fail:def
 --

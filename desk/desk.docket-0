@@ -5,6 +5,7 @@
   version+[0 1 0]
   website+'https://github.com/sigilante/caderno'
   license+'MIT'
+  image+'/apps/caderno/img/icon-256.png'
   base+'caderno'
-  glob-ames+[~nec 0v0]
+  glob-ames+[~nec 0v1.7gido.tkl14.l7s4v.0r81d.fc9lv]
 ==

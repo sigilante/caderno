@@ -37,6 +37,8 @@
       [%new-notebook ~]
       [%switch-notebook id=@t]
       [%delete-notebook id=@t]
+      [%mount-log ~]
+      [%commit-log ~]
   ==
 
 +$  update
@@ -46,6 +48,8 @@
       [%cell-status id=cell-id status=?(%running %done %error)]
       [%cell-added after=(unit cell-id) c=cell]
       [%cell-deleted id=cell-id]
+      [%log-mounted ~]
+      [%log-committed ~]
   ==
 
 ::  sole session state for shoe kernel delegation

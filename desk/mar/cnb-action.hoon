@@ -69,6 +69,10 @@
       =/  inner  (~(got by obj) 'delete-notebook')
       ?>  ?=([%o *] inner)
       [%delete-notebook id=(so:dejs:format (~(got by p.inner) 'id'))]
+    ?:  (~(has by obj) 'mount-log')
+      [%mount-log ~]
+    ?:  (~(has by obj) 'commit-log')
+      [%commit-log ~]
     !!
   --
 ++  grad  %noun

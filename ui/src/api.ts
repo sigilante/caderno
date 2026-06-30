@@ -29,6 +29,8 @@ export type Update =
   | { 'cell-status': { id: number; status: CellStatus } }
   | { 'cell-added': { after: number | null; c: Cell } }
   | { 'cell-deleted': { id: number } }
+  | { 'log-mounted': boolean }
+  | { 'log-committed': boolean }
 
 let channelId = `caderno-${Date.now()}`
 let eventSource: EventSource | null = null
@@ -90,6 +92,16 @@ export async function fetchActiveNotebook(): Promise<{ id: string; nb: Notebook 
   return res.json()
 }
 
+export async function fetchLogStatus(): Promise<boolean> {
+  try {
+    const res = await fetch('/~/scry/caderno/log-status/json', { credentials: 'include' })
+    if (!res.ok) return false
+    return res.json()
+  } catch {
+    return false
+  }
+}
+
 export interface Kelvins { hoon: number; arvo: number; zuse: number; nock: number; port: number }
 
 export async function fetchSoleSessions(agent: string): Promise<string[] | null> {
@@ -125,4 +137,6 @@ export const actions = {
   newNotebook: () => poke({ 'new-notebook': null }),
   switchNotebook: (id: string) => poke({ 'switch-notebook': { id } }),
   deleteNotebook: (id: string) => poke({ 'delete-notebook': { id } }),
+  mountLog: () => poke({ 'mount-log': null }),
+  commitLog: () => poke({ 'commit-log': null }),
 }

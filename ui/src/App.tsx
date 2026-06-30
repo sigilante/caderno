@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useCallback, useRef } from 'react'
 import {
-  fetchActiveNotebook, fetchKelvins, openChannel, closeChannel, actions,
+  fetchActiveNotebook, fetchKelvins, fetchLogStatus, openChannel, closeChannel, actions,
   type Notebook, type Cell, type Output, type Update, type Kelvins,
 } from './api'
 import { NotebookIndex } from './components/NotebookIndex'
@@ -13,6 +13,7 @@ type AppState = {
   active: string | null
   notebooks: NbEntry[]
   channelOpen: boolean
+  logMounted: boolean
   error: string | null
   running: Set<number>
   kelvins: Kelvins | null
@@ -79,6 +80,8 @@ type Action =
   | { type: 'cell-added'; cell: Cell; after: number | null }
   | { type: 'cell-deleted'; id: number }
   | { type: 'channel-open' }
+  | { type: 'log-mounted' }
+  | { type: 'log-committed' }
   | { type: 'error'; msg: string }
   | { type: 'set-view'; view: 'list' | 'nb'; id?: string }
   | { type: 'set-kernel'; kernel: string }
@@ -88,6 +91,7 @@ type Action =
   | { type: 'set-cell-type'; id: number; cellType: 'code' | 'markdown' }
   | { type: 'rename-nb'; title: string }
   | { type: 'set-kelvins'; kelvins: Kelvins }
+  | { type: 'set-log-mounted'; mounted: boolean }
 
 function reducer(state: AppState, action: Action): AppState {
   const activeNb = () => state.notebooks.find(n => n.id === state.active) ?? null
@@ -160,6 +164,12 @@ function reducer(state: AppState, action: Action): AppState {
     }
     case 'channel-open':
       return { ...state, channelOpen: true }
+    case 'log-mounted':
+      return { ...state, logMounted: true }
+    case 'log-committed':
+      return state
+    case 'set-log-mounted':
+      return { ...state, logMounted: action.mounted }
     case 'error':
       return { ...state, error: action.msg }
     case 'set-view':
@@ -210,7 +220,7 @@ function insertAfterCell(cells: CellEntry[], after: number, newCell: CellEntry):
 
 export default function App() {
   const [state, dispatch] = useReducer(reducer, {
-    view: 'list', active: null, notebooks: [], channelOpen: false, error: null, running: new Set<number>(), kelvins: null,
+    view: 'list', active: null, notebooks: [], channelOpen: false, logMounted: false, error: null, running: new Set<number>(), kelvins: null,
   })
   const stateRef = useRef(state)
   stateRef.current = state
@@ -222,6 +232,8 @@ export default function App() {
     else if ('cell-status' in upd)   dispatch({ type: 'cell-status', id: upd['cell-status'].id, status: upd['cell-status'].status })
     else if ('cell-added' in upd)    dispatch({ type: 'cell-added', cell: upd['cell-added'].c, after: upd['cell-added'].after })
     else if ('cell-deleted' in upd)  dispatch({ type: 'cell-deleted', id: upd['cell-deleted'].id })
+    else if ('log-mounted' in upd)   dispatch({ type: 'log-mounted' })
+    else if ('log-committed' in upd) dispatch({ type: 'log-committed' })
   }, [])
 
   useEffect(() => {
@@ -230,6 +242,9 @@ export default function App() {
       .catch(() => dispatch({ type: 'error', msg: 'Could not reach ship' }))
     fetchKelvins()
       .then(kelvins => dispatch({ type: 'set-kelvins', kelvins }))
+      .catch(() => {})
+    fetchLogStatus()
+      .then(mounted => dispatch({ type: 'set-log-mounted', mounted }))
       .catch(() => {})
     openChannel(handleUpdate, () => dispatch({ type: 'channel-open' }))
     return () => { closeChannel() }
@@ -354,9 +369,19 @@ export default function App() {
               <div style={{ color: '#6b5a3c', fontSize: 10, letterSpacing: '.24em', padding: '2px 14px 0', textAlign: 'right' }}>CLAY · /caderno</div>
               <div className="lc-press" onClick={onNewNb} style={{ height: 62, borderRadius: '0 0 0 26px', background: '#cc88ff', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 18, letterSpacing: '.03em' }}>+ NEW NOTEBOOK</div>
               <div style={{ height: 50, borderRadius: '0 30px 30px 0', background: '#6c8cff', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 15, letterSpacing: '.03em' }}>{state.notebooks.length} BUFFERS</div>
-              <div style={{ height: 50, borderRadius: '0 30px 30px 0', background: '#3a2a10', color: state.channelOpen ? '#99e6a3' : '#9a8147', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 15, letterSpacing: '.03em' }}>
-                {state.channelOpen ? 'SYNCED' : 'CONNECTING'}
-              </div>
+              {state.logMounted ? (
+                <div
+                  className="lc-press"
+                  onClick={() => actions.commitLog()}
+                  style={{ height: 50, borderRadius: '0 30px 30px 0', background: '#3a4a3a', color: '#99e6a3', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 15, letterSpacing: '.03em' }}
+                >COMMIT ▸</div>
+              ) : (
+                <div
+                  className="lc-press"
+                  onClick={() => actions.mountLog()}
+                  style={{ height: 50, borderRadius: '0 30px 30px 0', background: '#3a2a10', color: '#9a8147', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 15, letterSpacing: '.03em' }}
+                >MOUNT</div>
+              )}
             </>
           )}
 
