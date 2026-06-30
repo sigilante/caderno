@@ -31,6 +31,7 @@
       [%delete-cell id=cell-id]
       [%update-source id=cell-id src=@t]
       [%set-kernel kernel=@tas]
+      [%reset-subject ~]
   ==
 
 +$  update

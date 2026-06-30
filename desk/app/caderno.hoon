@@ -1,5 +1,5 @@
 ::  /app/caderno.hoon
-::  caderno: hoon notebook (phase 1)
+::  caderno: hoon notebook (phase 2 — persistent subject, correct insert)
 ::
 /-  *caderno, *sole
 /+  default-agent, dbug
@@ -10,8 +10,21 @@
       ksession=(unit kernel-session)
       counter=@ud
   ==
-+$  versioned-state  $%([%0 state-0] [%1 state-1])
+::  state-2 adds a per-notebook Hoon evaluation subject.
+::  After each successful Hoon cell run, the result vase is slop'd onto the
+::  subject so successive cells can reference prior results via wing paths
+::  (e.g. `-` = last result, `+.-` = result before that).  The stdlib
+::  remains accessible because it lives in the tail.  On every on-load we
+::  reset to !>(..add) so stale vases from prior kernel versions don't crash.
++$  state-2
+  $:  nb=notebook
+      ksession=(unit kernel-session)
+      counter=@ud
+      hoon-subject=vase
+  ==
++$  versioned-state  $%([%0 state-0] [%1 state-1] [%2 state-2])
 +$  card  card:agent:gall
+
 ++  find-cell
   |=  [id=cell-id cs=(list cell)]
   ^-  (unit cell)
@@ -19,25 +32,49 @@
   ?~  cs  ~
   ?.  =(id id.i.cs)  $(cs t.cs)
   `i.cs
+
 ++  replace-cell
   |=  [id=cell-id new=cell cs=(list cell)]
   ^-  (list cell)
   (turn cs |=(c=cell ?:(=(id id.c) new c)))
+
+++  insert-after-cell
+  ::  Insert `new` immediately after the cell whose id = `aid`.
+  ::  If `aid` is not found, append `new` at the end.
+  |=  [aid=cell-id new=cell cs=(list cell)]
+  ^-  (list cell)
+  |-
+  ?~  cs  ~[new]
+  ?:  =(aid id.i.cs)
+    (weld ~[i.cs new] t.cs)
+  [i.cs $(cs t.cs)]
+
 ++  tang-to-cord
   |=  t=tang
   ^-  @t
   (crip (zing (turn t |=(=tank ~(ram re tank)))))
-++  eval-source
-  |=  src=@t
-  ^-  output
-  =/  std  !>(..add)
+
+++  fresh-subject
+  ^-  vase
+  !>(..add)
+
+::  Evaluate a Hoon cord against a subject vase.
+::  Returns the output to show and the new accumulated subject.
+::  On success: new-subject = slop(result, old-subject) so the result is
+::  at `-` and the old subject (with stdlib) is accessible at `+`.
+::  On error: subject is returned unchanged.
+++  eval-hoon
+  |=  [src=@t subj=vase]
+  ^-  [output vase]
   =/  parsed  (mule |.((ream src)))
   ?:  ?=(%| -.parsed)
-    [%error 'ParseError' (tang-to-cord p.parsed)]
-  =/  evaled  (mule |.((slap std p.parsed)))
+    [[%error 'ParseError' (tang-to-cord p.parsed)] subj]
+  =/  evaled  (mule |.((slap subj p.parsed)))
   ?:  ?=(%| -.evaled)
-    [%error 'EvalError' (tang-to-cord p.evaled)]
-  [%text (crip ~(ram re (sell p.evaled)))]
+    [[%error 'EvalError' (tang-to-cord p.evaled)] subj]
+  :-  [%text (crip ~(ram re (sell p.evaled)))]
+  (slop p.evaled subj)
+
 ++  update-to-json
   |=  upd=update
   ^-  json
@@ -63,20 +100,24 @@
     %-  ~(gas by *(map @t json))
     ~[['cell-deleted' [%o (~(gas by *(map @t json)) ~[['id' [%n (scot %ud id.upd)]]])]]]
   ==
+
 ++  broadcast
   |=  upd=update
   ^-  card
   [%give %fact [[%notebook ~] ~] %json !>((update-to-json upd))]
+
 ++  accum-to-output
   |=  lines=(list @t)
   ^-  output
   [%text (crip (zing (turn lines trip)))]
+
 ++  flatten-effects
   |=  efx=sole-effect
   ^-  (list sole-effect)
   ?:  ?=([%mor *] efx)
     (zing (turn p.efx flatten-effects))
   ~[efx]
+
 ++  output-to-json
   |=  out=output
   ^-  json
@@ -92,6 +133,7 @@
         ['evalue' [%s evalue.out]]
     ==
   ==
+
 ++  cell-to-json
   |=  c=cell
   ^-  json
@@ -103,6 +145,7 @@
       ['exec_count' ?~(exec-count.c ~ [%n (scot %ud u.exec-count.c)])]
       ['outputs' [%a (turn outputs.c output-to-json)]]
   ==
+
 ++  notebook-to-json
   |=  nb=notebook
   ^-  json
@@ -113,13 +156,15 @@
       ['cells' [%a (turn cells.nb cell-to-json)]]
   ==
 --
-=|  state-1
+
+=|  state-2
 =*  state  -
 ^-  agent:gall
 %-  agent:dbug
 |_  =bowl:gall
 +*  this  .
     def   ~(. (default-agent this %.n) bowl)
+
 ++  on-init
   ^-  (quip card _this)
   =/  blank  ^-  notebook
@@ -127,20 +172,29 @@
         kernel=%hoon
         title='untitled'
     ==
-  `this(nb blank, ksession ~, counter 0)
-++  on-save  !>(`versioned-state`[%1 nb ksession counter])
+  `this(nb blank, ksession ~, counter 0, hoon-subject fresh-subject)
+
+++  on-save  !>(`versioned-state`[%2 nb ksession counter hoon-subject])
+
 ++  on-load
   |=  old=vase
   ^-  (quip card _this)
+  ::  Always reset hoon-subject on load: stored vases may be stale after
+  ::  kernel upgrades, and a reset is safer than a crash.
+  =/  try2  (mule |.(!<(state-2 old)))
+  ?:  ?=(%& -.try2)
+    =/  s  p.try2
+    `this(nb nb.s, ksession ksession.s, counter counter.s, hoon-subject fresh-subject)
   =/  try1  (mule |.(!<(state-1 old)))
   ?:  ?=(%& -.try1)
     =/  s  p.try1
-    `this(nb nb.s, ksession ksession.s, counter counter.s)
+    `this(nb nb.s, ksession ksession.s, counter counter.s, hoon-subject fresh-subject)
   =/  try0  (mule |.(!<(state-0 old)))
   ?:  ?=(%& -.try0)
     =/  s  p.try0
-    `this(nb nb.s, ksession ~, counter counter.s)
-  `this(nb [~ %hoon 'untitled'], ksession ~, counter 0)
+    `this(nb nb.s, ksession ~, counter counter.s, hoon-subject fresh-subject)
+  `this(nb [~ %hoon 'untitled'], ksession ~, counter 0, hoon-subject fresh-subject)
+
 ++  on-poke
   |=  [=mark =vase]
   ^-  (quip card _this)
@@ -154,13 +208,13 @@
       ?~  c  `this
       ?.  =(%code type.u.c)  `this
       =/  new-count  +(counter)
-      ::  hoon kernel: direct eval
+      ::  hoon kernel: evaluate against accumulated subject
       ?:  =(%hoon kernel.nb)
-        =/  out  (eval-source source.u.c)
+        =/  [out new-subj]  (eval-hoon source.u.c hoon-subject)
         =/  new-cell  u.c(outputs [out ~], exec-count `new-count)
         =/  new-nb  nb(cells (replace-cell id new-cell cells.nb))
         =/  status  ?-(-.out %text %done, %error %error)
-        :_  this(nb new-nb, counter new-count)
+        :_  this(nb new-nb, counter new-count, hoon-subject new-subj)
         :~  (broadcast [%cell-status id %running])
             (broadcast [%cell-output id out])
             (broadcast [%cell-status id status])
@@ -217,18 +271,25 @@
       ==
     ::
         %run-all
-      ::  run-all only works for %hoon kernel; shoe kernels are sequential/async
+      ::  Runs all code cells top-to-bottom with a fresh subject.
+      ::  Each cell's result is accumulated so later cells can reference
+      ::  earlier results.  Shoe kernels are async and not supported here.
       =/  code-cells  (skim cells.nb |=(c=cell =(%code type.c)))
       =/  cs=(list cell)   cells.nb
       =/  cd=(list card)   ~
       =/  ct=@ud           counter
+      =/  subj=vase        fresh-subject
       |-
       ?~  code-cells
-        :_  this(nb nb(cells cs), counter ct)
+        :_  this(nb nb(cells cs), counter ct, hoon-subject subj)
         cd
       =/  c   i.code-cells
       =/  new-ct  +(ct)
-      =/  out  (eval-source source.c)
+      =/  [out new-subj]
+        ?:  =(%hoon kernel.nb)
+          (eval-hoon source.c subj)
+        ::  non-hoon kernel: run-all not supported; emit a placeholder error
+        [[%error 'KernelError' 'run-all unsupported for shoe kernels'] subj]
       =/  new-cell  c(outputs [out ~], exec-count `new-ct)
       =/  status  ?-(-.out %text %done, %error %error)
       =/  new-cd
@@ -237,7 +298,7 @@
             (broadcast [%cell-output id.c out])
             (broadcast [%cell-status id.c status])
         ==
-      $(code-cells t.code-cells, cs (replace-cell id.c new-cell cs), cd new-cd, ct new-ct)
+      $(code-cells t.code-cells, cs (replace-cell id.c new-cell cs), cd new-cd, ct new-ct, subj new-subj)
     ::
         %insert-cell
       =/  new-id  counter
@@ -248,7 +309,11 @@
             outputs=~
             exec-count=~
         ==
-      =/  new-nb  nb(cells (snoc cells.nb new-cell))
+      =/  new-cells
+        ?~  after.act
+          (snoc cells.nb new-cell)
+        (insert-after-cell u.after.act new-cell cells.nb)
+      =/  new-nb  nb(cells new-cells)
       :_  this(nb new-nb, counter +(counter))
       ~[(broadcast [%cell-added new-cell])]
     ::
@@ -267,8 +332,14 @@
     ::
         %set-kernel
       `this(nb nb(kernel kernel.act))
+    ::
+        %reset-subject
+      ::  Clears the accumulated Hoon evaluation subject back to !>(..add).
+      ::  Use this when prior cell results have polluted the environment.
+      `this(hoon-subject fresh-subject)
     ==
   ==
+
 ++  on-watch
   |=  =path
   ^-  (quip card _this)
@@ -277,7 +348,9 @@
     :_  this
     ~[[%give %fact ~ %json !>((update-to-json [%state nb]))]]
   ==
+
 ++  on-leave  on-leave:def
+
 ++  on-peek
   |=  =path
   ^-  (unit (unit cage))
@@ -285,6 +358,7 @@
       [%x %notebook ~]
     ``[%json !>((notebook-to-json nb))]
   ==
+
 ++  on-agent
   |=  [=wire =sign:agent:gall]
   ^-  (quip card _this)
@@ -357,6 +431,7 @@
       `this
     ==
   ==
+
 ++  on-arvo
   |=  [=wire =sign-arvo]
   ^-  (quip card _this)
@@ -376,5 +451,6 @@
         (broadcast [%cell-status cid %done])
     ==
   ==
+
 ++  on-fail   on-fail:def
 --

@@ -103,4 +103,5 @@ export const actions = {
   updateSource: (id: number, src: string) =>
     poke({ 'update-source': { id, src } }),
   setKernel: (kernel: string) => poke({ 'set-kernel': { kernel } }),
+  resetSubject: () => poke({ 'reset-subject': null }),
 }

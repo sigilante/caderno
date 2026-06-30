@@ -40,6 +40,8 @@
       =/  inner  (~(got by obj) 'set-kernel')
       ?>  ?=([%o *] inner)
       [%set-kernel kernel=`@tas`(so:dejs:format (~(got by p.inner) 'kernel'))]
+    ?:  (~(has by obj) 'reset-subject')
+      [%reset-subject ~]
     !!
   --
 ++  grow
