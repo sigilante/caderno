@@ -52,6 +52,41 @@
   ?:  ?=([%mor *] efx)
     (zing (turn p.efx flatten-effects))
   ~[efx]
+++  output-to-json
+  |=  out=output
+  ^-  json
+  ?-  -.out
+      %text
+    :-  %o
+    %-  ~(gas by *(map @t json))
+    ~[['text' [%s data.out]]]
+      %error
+    :-  %o
+    %-  ~(gas by *(map @t json))
+    :~  ['ename' [%s ename.out]]
+        ['evalue' [%s evalue.out]]
+    ==
+  ==
+++  cell-to-json
+  |=  c=cell
+  ^-  json
+  :-  %o
+  %-  ~(gas by *(map @t json))
+  :~  ['id' [%n (scot %ud id.c)]]
+      ['type' [%s (scot %tas type.c)]]
+      ['source' [%s source.c]]
+      ['exec_count' ?~(exec-count.c ~ [%n (scot %ud u.exec-count.c)])]
+      ['outputs' [%a (turn outputs.c output-to-json)]]
+  ==
+++  notebook-to-json
+  |=  nb=notebook
+  ^-  json
+  :-  %o
+  %-  ~(gas by *(map @t json))
+  :~  ['title' [%s title.nb]]
+      ['kernel' [%s (scot %tas kernel.nb)]]
+      ['cells' [%a (turn cells.nb cell-to-json)]]
+  ==
 --
 =|  state-1
 =*  state  -
@@ -218,7 +253,13 @@
     ~[[%give %fact ~ %noun !>(`update`[%state nb])]]
   ==
 ++  on-leave  on-leave:def
-++  on-peek   on-peek:def
+++  on-peek
+  |=  =path
+  ^-  (unit (unit cage))
+  ?+  path  ~
+      [%x %notebook ~]
+    ``[%json !>((notebook-to-json nb))]
+  ==
 ++  on-agent
   |=  [=wire =sign:agent:gall]
   ^-  (quip card _this)
