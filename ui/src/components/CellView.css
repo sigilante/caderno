@@ -1,0 +1,165 @@
+.cell {
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.cell-source-row {
+  display: flex;
+  background: var(--green);
+  border-radius: 14px;
+  transition: filter 0.15s;
+  min-height: 60px;
+}
+
+.cell.empty .cell-source-row {
+  background: var(--slate);
+}
+
+.cell.running .cell-source-row {
+  background: var(--gold);
+}
+
+.cell.has-error .cell-source-row {
+  background: var(--red);
+}
+
+.cell-source-row:hover {
+  filter: brightness(1.08);
+}
+
+.cell-gutter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  padding: 12px 10px 10px;
+  min-width: 48px;
+  flex-shrink: 0;
+}
+
+.exec-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: rgba(0,0,0,0.45);
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.cell.running .exec-count {
+  animation: pulse 0.8s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
+
+.run-btn {
+  background: rgba(0,0,0,0.15);
+  border: none;
+  border-radius: 4px;
+  color: rgba(0,0,0,0.6);
+  font-size: 9px;
+  padding: 3px 5px;
+  cursor: pointer;
+  line-height: 1;
+  transition: background 0.1s;
+}
+
+.run-btn:hover:not(:disabled) {
+  background: rgba(0,0,0,0.25);
+  color: #000;
+}
+
+.run-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.cell-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 0;
+}
+
+.cell-source {
+  background: transparent;
+  border: none;
+  color: #000;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  outline: none;
+  padding: 0 12px 0 0;
+  resize: none;
+  width: 100%;
+  min-height: 36px;
+  overflow: hidden;
+}
+
+.cell-source::placeholder {
+  color: rgba(0,0,0,0.35);
+}
+
+.cell-actions {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 4px;
+  padding: 10px 10px 10px 0;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.cell:hover .cell-actions {
+  opacity: 1;
+}
+
+.cell-btn {
+  background: rgba(0,0,0,0.15);
+  border: none;
+  border-radius: 4px;
+  color: rgba(0,0,0,0.5);
+  font-size: 13px;
+  line-height: 1;
+  padding: 3px 6px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.cell-btn:hover {
+  background: rgba(0,0,0,0.25);
+  color: #000;
+}
+
+.cell-btn-delete:hover {
+  background: rgba(200,0,0,0.2);
+  color: #800;
+}
+
+.cell-output-row {
+  background: var(--gold);
+  border-radius: 0 0 14px 14px;
+  padding: 10px 14px 10px 48px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #000;
+  margin-top: 2px;
+}
+
+.cell-output-row.output-error {
+  background: color-mix(in srgb, var(--red) 60%, #000);
+  color: #fff;
+}
+
+.error-name {
+  font-weight: 700;
+}

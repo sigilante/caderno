@@ -1,0 +1,10 @@
+:~
+  title+'Caderno'
+  info+'Hoon notebook for Urbit.'
+  color+0xff.9900
+  version+[0 1 0]
+  website+'https://github.com/sigilante/caderno'
+  license+'MIT'
+  base+'caderno'
+  glob-ames+[~nec 0v0]
+==

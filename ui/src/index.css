@@ -1,0 +1,25 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #000;
+  --orange: #ff9900;
+  --green: #9bb267;
+  --gold: #d9a441;
+  --slate: #5f6b7a;
+  --purple: #cc88ff;
+  --blue: #6c8cff;
+  --red: #ff8866;
+  --text: #e8e8e8;
+  --text-dim: #666;
+  --sidebar-w: 300px;
+  --title-h: 120px;
+  --font-mono: 'Berkeley Mono', 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  --font-sans: 'Antonio', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+html, body, #root { height: 100%; background: var(--bg); color: var(--text); }
+body { font-family: var(--font-mono); font-size: 14px; line-height: 1.5; }
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }

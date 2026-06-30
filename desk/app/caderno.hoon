@@ -38,10 +38,35 @@
   ?:  ?=(%| -.evaled)
     [%error 'EvalError' (tang-to-cord p.evaled)]
   [%text (crip ~(ram re (sell p.evaled)))]
+++  update-to-json
+  |=  upd=update
+  ^-  json
+  ?-  -.upd
+      %state
+    :-  %o
+    %-  ~(gas by *(map @t json))
+    ~[['state' [%o (~(gas by *(map @t json)) ~[['nb' (notebook-to-json nb.upd)]])]]]
+      %cell-output
+    :-  %o
+    %-  ~(gas by *(map @t json))
+    ~[['cell-output' [%o (~(gas by *(map @t json)) ~[['id' [%n (scot %ud id.upd)]] ['out' (output-to-json out.upd)]])]]]
+      %cell-status
+    :-  %o
+    %-  ~(gas by *(map @t json))
+    ~[['cell-status' [%o (~(gas by *(map @t json)) ~[['id' [%n (scot %ud id.upd)]] ['status' [%s (scot %tas status.upd)]]])]]]
+      %cell-added
+    :-  %o
+    %-  ~(gas by *(map @t json))
+    ~[['cell-added' [%o (~(gas by *(map @t json)) ~[['c' (cell-to-json c.upd)]])]]]
+      %cell-deleted
+    :-  %o
+    %-  ~(gas by *(map @t json))
+    ~[['cell-deleted' [%o (~(gas by *(map @t json)) ~[['id' [%n (scot %ud id.upd)]]])]]]
+  ==
 ++  broadcast
   |=  upd=update
   ^-  card
-  [%give %fact [[%notebook ~] ~] %noun !>(upd)]
+  [%give %fact [[%notebook ~] ~] %json !>((update-to-json upd))]
 ++  accum-to-output
   |=  lines=(list @t)
   ^-  output
@@ -250,7 +275,7 @@
   ?+  path  (on-watch:def path)
       [%notebook ~]
     :_  this
-    ~[[%give %fact ~ %noun !>(`update`[%state nb])]]
+    ~[[%give %fact ~ %json !>((update-to-json [%state nb]))]]
   ==
 ++  on-leave  on-leave:def
 ++  on-peek
