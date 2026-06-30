@@ -1,25 +1,33 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-:root {
-  --bg: #000;
-  --orange: #ff9900;
-  --green: #9bb267;
-  --gold: #d9a441;
-  --slate: #5f6b7a;
-  --purple: #cc88ff;
-  --blue: #6c8cff;
-  --red: #ff8866;
-  --text: #e8e8e8;
-  --text-dim: #666;
-  --sidebar-w: 300px;
-  --title-h: 120px;
-  --font-mono: 'Berkeley Mono', 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
-  --font-sans: 'Antonio', -apple-system, BlinkMacSystemFont, sans-serif;
+html, body { background: #000; }
+html, body, #root { height: 100%; }
+
+::selection { background: #ff9900; color: #000; }
+
+.lc-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+.lc-scroll::-webkit-scrollbar-track { background: #000; }
+.lc-scroll::-webkit-scrollbar-thumb { background: #3a2a12; border-radius: 6px; }
+.lc-scroll::-webkit-scrollbar-thumb:hover { background: #ff9900; }
+
+textarea.lc-src {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  resize: none;
+  background: transparent;
+  font-family: 'JetBrains Mono', monospace;
+  line-height: 1.5;
+  padding: 0;
+  margin: 0;
+  caret-color: #ff9900;
+  overflow: hidden;
+  display: block;
 }
 
-html, body, #root { height: 100%; background: var(--bg); color: var(--text); }
-body { font-family: var(--font-mono); font-size: 14px; line-height: 1.5; }
+.lc-press { transition: filter .12s, transform .05s; cursor: pointer; }
+.lc-press:hover { filter: brightness(1.13); }
+.lc-press:active { transform: translateX(2px); }
 
-::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+@keyframes lcpulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+@keyframes lcscan { 0% { transform: translateY(0); } 100% { transform: translateY(6px); } }
