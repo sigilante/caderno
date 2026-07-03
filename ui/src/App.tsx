@@ -232,7 +232,7 @@ const kernelColor = (k: string) => KERNEL_COLORS[k] ?? '#6c8cff'
 
 export default function App() {
   const [state, dispatch] = useReducer(reducer, {
-    view: 'list', active: null, notebooks: [], channelOpen: false, logMounted: false, error: null, running: new Set<number>(), kelvins: null, soleSessions: null, kernels: ['hoon', 'north'],
+    view: 'list', active: null, notebooks: [], channelOpen: false, logMounted: false, error: null, running: new Set<number>(), kelvins: null, soleSessions: null, kernels: ['hoon'],
   })
   const stateRef = useRef(state)
   stateRef.current = state
@@ -262,9 +262,11 @@ export default function App() {
     return () => { closeChannel() }
   }, [handleUpdate])
 
-  // Discover available kernels once: in-process 'hoon' + running agents that
-  // answer the shoe /x/sole/sessions probe. Falls back to the ['hoon','north']
-  // default if discovery yields nothing (e.g. offline).
+  // Discover available kernels once: in-process 'hoon' (always present, not an
+  // agent) + running agents that answer the shoe /x/sole/sessions probe. Nothing
+  // is white-listed — a kernel appears only if detected. If discovery yields no
+  // shoe agents (e.g. offline) we keep just 'hoon'; the active notebook's own
+  // kernel stays selectable regardless via kernelList below.
   useEffect(() => {
     let cancelled = false
     discoverKernels()
@@ -441,6 +443,12 @@ export default function App() {
                   style={{ height: 50, borderRadius: '0 30px 30px 0', background: '#3a2a10', color: '#9a8147', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 15, letterSpacing: '.03em' }}
                 >MOUNT</div>
               )}
+              <div
+                className="lc-press"
+                onClick={() => actions.importLog()}
+                title="Load notebooks from the committed %caderno-log desk into state"
+                style={{ height: 50, borderRadius: '0 30px 30px 0', background: '#2a2438', color: '#b79ae0', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 15, letterSpacing: '.03em' }}
+              >◂ IMPORT</div>
             </>
           )}
 

@@ -39,6 +39,7 @@
       [%delete-notebook id=@t]
       [%mount-log ~]
       [%commit-log ~]
+      [%import-log ~]
   ==
 
 +$  update

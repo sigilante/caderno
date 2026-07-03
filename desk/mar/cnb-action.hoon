@@ -73,6 +73,8 @@
       [%mount-log ~]
     ?:  (~(has by obj) 'commit-log')
       [%commit-log ~]
+    ?:  (~(has by obj) 'import-log')
+      [%import-log ~]
     !!
   --
 ++  grad  %noun

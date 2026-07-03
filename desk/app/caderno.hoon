@@ -334,6 +334,63 @@
       ['kernel' [%s (scot %tas kernel.nb)]]
       ['cells' [%a (turn cells.nb cell-to-json)]]
   ==
+::  JSON -> state parsers: inverses of the *-to-json arms above, used to
+::  re-import notebooks written to %caderno-log.
+::
+++  json-numb
+  ::  tolerant JSON-number -> @ud: strips the dot separators scot %ud emits.
+  |=  j=json
+  ^-  @ud
+  ?>  ?=([%n *] j)
+  (rash (crip (skip (trip p.j) |=(c=@tD =('.' c)))) dem)
+::
+++  json-to-output
+  |=  j=json
+  ^-  output
+  ?>  ?=([%o *] j)
+  =/  m  p.j
+  ?:  (~(has by m) 'text')
+    [%text (so:dejs:format (~(got by m) 'text'))]
+  :+  %error
+    (so:dejs:format (~(got by m) 'ename'))
+  (so:dejs:format (~(got by m) 'evalue'))
+::
+++  json-to-cell
+  |=  j=json
+  ^-  cell
+  ?>  ?=([%o *] j)
+  =/  m     p.j
+  =/  outs  (~(got by m) 'outputs')
+  =/  ec    (~(got by m) 'exec_count')
+  =/  tp    (so:dejs:format (~(got by m) 'type'))
+  :*  id=(json-numb (~(got by m) 'id'))
+      type=`cell-type`?:(=(tp 'markdown') %markdown %code)
+      source=(so:dejs:format (~(got by m) 'source'))
+      outputs=?>(?=([%a *] outs) (turn p.outs json-to-output))
+      exec-count=?~(ec ~ `(json-numb ec))
+  ==
+::
+++  json-to-notebook
+  |=  j=json
+  ^-  notebook
+  ?>  ?=([%o *] j)
+  =/  m   p.j
+  =/  cs  (~(got by m) 'cells')
+  :*  cells=?>(?=([%a *] cs) (turn p.cs json-to-cell))
+      kernel=`@tas`(so:dejs:format (~(got by m) 'kernel'))
+      title=(so:dejs:format (~(got by m) 'title'))
+  ==
+::
+++  json-to-state
+  ::  parse a logged notebook file, {state:{id,nb}} -> [id notebook]
+  |=  j=json
+  ^-  [@t notebook]
+  ?>  ?=([%o *] j)
+  =/  st  (~(got by p.j) 'state')
+  ?>  ?=([%o *] st)
+  =/  m  p.st
+  :-  (so:dejs:format (~(got by m) 'id'))
+  (json-to-notebook (~(got by m) 'nb'))
 --
 
 =|  state-4
@@ -582,6 +639,30 @@
       :~  [%pass /caderno/clay %arvo %c [%info %caderno-log [%& soba]]]
           [%pass /caderno/hood/commit %agent [our.bowl %hood] %poke %kiln-commit !>([%caderno-log %.n])]
           (broadcast [%log-committed ~])
+      ==
+        %import-log
+      ::  read notebooks back from %caderno-log into state (Clay -> gall).
+      ::  Each /notebook/<id>/txt holds one line of {state:{id,nb}} JSON; a
+      ::  file that is missing, unreadable, or malformed is skipped via mule.
+      ::  Imported notebooks override in-memory ones with the same id.
+      =/  =arch
+        .^(arch %cy (en-beam [[our.bowl %caderno-log [%da now.bowl]] /notebook]))
+      =/  imported=(map @t notebook)
+        %-  ~(gas by *(map @t notebook))
+        %+  murn  ~(tap in ~(key by dir.arch))
+        |=  id=@ta
+        ^-  (unit [@t notebook])
+        =/  fp  (en-beam [[our.bowl %caderno-log [%da now.bowl]] /notebook/[id]/txt])
+        =/  res  (mule |.((json-to-state (need (de:json:html (rap 3 .^(wain %cx fp)))))))
+        ?:(?=(%| -.res) ~ `p.res)
+      =/  merged=(map @t notebook)  (~(uni by nbs) imported)
+      =/  new-active=@t
+        ?:  (~(has by merged) active)  active
+        =/  ps  ~(tap by merged)
+        ?~(ps active p.i.ps)
+      :_  this(nbs merged, active new-active)
+      :~  (broadcast [%nb-list (nb-list-items merged)])
+          (broadcast [%state new-active (need (~(get by merged) new-active))])
       ==
     ==
   ==

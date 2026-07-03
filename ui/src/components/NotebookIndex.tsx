@@ -9,6 +9,10 @@ interface Props {
 }
 
 export function NotebookIndex({ notebooks, error, onOpen }: Props) {
+  // The backend lists notebooks in map-hash order; present them alphabetically
+  // by title so the index is stable and scannable.
+  const sorted = [...notebooks].sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
   return (
     <div
       className="lc-scroll"
@@ -32,7 +36,7 @@ export function NotebookIndex({ notebooks, error, onOpen }: Props) {
           </div>
         )}
 
-        {notebooks.map((nb, idx) => (
+        {sorted.map((nb, idx) => (
           <div
             key={nb.id}
             className="lc-press"

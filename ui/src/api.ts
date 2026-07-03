@@ -145,11 +145,15 @@ export async function fetchAgents(): Promise<string[]> {
   }
 }
 
+// Shoe agents that answer the probe but aren't real notebook kernels — e.g.
+// %shoe, the shoe library's own example/skeleton agent.
+const KERNEL_BLACKLIST = new Set(['shoe'])
+
 // Discover shoe REPL kernels: probe each running agent with the shoe
 // /x/sole/sessions scry (a non-shoe agent 404s → null), keeping those that
 // answer. The in-process 'hoon' kernel is prepended and is not an agent.
 export async function discoverKernels(): Promise<string[]> {
-  const agents = await fetchAgents()
+  const agents = (await fetchAgents()).filter(a => !KERNEL_BLACKLIST.has(a))
   const flags = await Promise.all(agents.map(a => fetchSoleSessions(a).then(r => r !== null)))
   const shoe = agents.filter((_, i) => flags[i]).sort()
   return ['hoon', ...shoe]
@@ -180,4 +184,5 @@ export const actions = {
   deleteNotebook: (id: string) => poke({ 'delete-notebook': { id } }),
   mountLog: () => poke({ 'mount-log': null }),
   commitLog: () => poke({ 'commit-log': null }),
+  importLog: () => poke({ 'import-log': null }),
 }
