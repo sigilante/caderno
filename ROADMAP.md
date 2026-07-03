@@ -53,10 +53,33 @@ Status as of the sole-sessions / kernel-picker / Clay-import work.
 
 ## Post-launch
 
+Slated from the Gnome/Angel code review:
+
+- **`cnb-update` mark** — updates are currently hand-serialized to `%json` on the
+  agent side and hand-parsed on the TS side (~130 lines, no shared source of
+  truth). Introduce a real `cnb-update` mark owning `+$update ⇆ json`, and have
+  `broadcast`/`pub-fact`/`catalog-fact` give facts with it. Makes the protocol
+  symmetric with `cnb-action` and extensible. (The UI already *named* this mark.)
+- **Fork provenance** — `notebook` has no origin field, so "forked from ~ship/id"
+  is unrepresentable. Add `origin=(unit [who=@p id=@t nbformat=@ud])`, stamp it on
+  fork, surface a "forked from ~ship" ribbon. Foundation for the explorer.
+- **Generic `%sole-action` kernel driver** — to make "any `/lib/shoe` agent" a
+  real kernel without each agent implementing `%eval-command`: drive the sole
+  command line generically (`%det` to type source, `%ret` to submit, collect
+  `%sole-effect` until `%pro`). Alternatively, upstream `%eval-command` into
+  `/lib/shoe`.
+- **Sanitize fork ids** — a hostile publisher can publish an id with illegal knot
+  bytes; a fork inherits it and a later `%commit-log` can bail. Guard the id when
+  forking.
+- Minor/known: split the shared `counter` (cell-ids vs exec-counts); async shoe
+  output lands on the active notebook at result-time (switch-during-eval edge);
+  brittle `%mount-log` base-mar reads.
+
+Product:
+
 - Multiple outputs per cell (only `outputs[0]` is shown); markdown cell
   rendering; cell reordering; `.ipynb`-compatible export.
-- **Distribution** — publish notebooks via Clay desk subscription (the export
-  half exists; needs the subscribe / import-from-remote half) or a Gall
-  `/notebook` follow for live mirroring. A companion `caderno-explorer` agent
-  would index notebooks from ships you follow and drive a discovery pane. (See
-  git history for the fuller sketch.)
+- **Distribution / explorer** — a companion `caderno-explorer` agent that indexes
+  published notebooks from ships you follow (contacts/groups as the trust layer)
+  into one browsable directory — the network-discovery layer above by-ship
+  lookup. Per-notebook ACLs (the `on-watch` gate already localizes the check).
