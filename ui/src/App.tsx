@@ -343,11 +343,21 @@ export default function App() {
     if (state.published.includes(id)) actions.unpublish(id)
     else actions.publish(id)
   }
+  // Track the single open lookup subscription so it's torn down when we look up
+  // a different ship or leave the view — otherwise each lookup leaks a /published-list sub.
+  const lookupSub = useRef<string | null>(null)
   const onOpenLookup = () => dispatch({ type: 'set-view', view: 'lookup' })
   const onLookupShip = (raw: string) => {
     const who = raw.trim()
     if (!who) return
-    actions.lookup(who.startsWith('~') ? who : `~${who}`)
+    const patp = who.startsWith('~') ? who : `~${who}`
+    if (lookupSub.current && lookupSub.current !== patp) actions.unlookup(lookupSub.current)
+    lookupSub.current = patp
+    actions.lookup(patp)
+  }
+  const onLeaveLookup = () => {
+    if (lookupSub.current) { actions.unlookup(lookupSub.current); lookupSub.current = null }
+    dispatch({ type: 'set-view', view: 'list' })
   }
   const onFollow = (who: string, id: string) => { actions.follow(who, id) }
   const onUnfollow = (who: string, id: string) => { actions.unfollow(who, id) }
@@ -565,7 +575,7 @@ export default function App() {
             follows={state.follows}
             onLookupShip={onLookupShip}
             onFollow={onFollow}
-            onBack={() => dispatch({ type: 'set-view', view: 'list' })}
+            onBack={onLeaveLookup}
           />
         ) : (
           <NotebookIndex
