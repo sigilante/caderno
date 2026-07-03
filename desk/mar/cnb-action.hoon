@@ -75,6 +75,43 @@
       [%commit-log ~]
     ?:  (~(has by obj) 'import-log')
       [%import-log ~]
+    ?:  (~(has by obj) 'publish')
+      =/  inner  (~(got by obj) 'publish')
+      ?>  ?=([%o *] inner)
+      [%publish id=(so:dejs:format (~(got by p.inner) 'id'))]
+    ?:  (~(has by obj) 'unpublish')
+      =/  inner  (~(got by obj) 'unpublish')
+      ?>  ?=([%o *] inner)
+      [%unpublish id=(so:dejs:format (~(got by p.inner) 'id'))]
+    ?:  (~(has by obj) 'follow')
+      =/  inner  (~(got by obj) 'follow')
+      ?>  ?=([%o *] inner)
+      =/  im  p.inner
+      :+  %follow
+        who=(slav %p (so:dejs:format (~(got by im) 'who')))
+      id=(so:dejs:format (~(got by im) 'id'))
+    ?:  (~(has by obj) 'unfollow')
+      =/  inner  (~(got by obj) 'unfollow')
+      ?>  ?=([%o *] inner)
+      =/  im  p.inner
+      :+  %unfollow
+        who=(slav %p (so:dejs:format (~(got by im) 'who')))
+      id=(so:dejs:format (~(got by im) 'id'))
+    ?:  (~(has by obj) 'fork')
+      =/  inner  (~(got by obj) 'fork')
+      ?>  ?=([%o *] inner)
+      =/  im  p.inner
+      :+  %fork
+        who=(slav %p (so:dejs:format (~(got by im) 'who')))
+      id=(so:dejs:format (~(got by im) 'id'))
+    ?:  (~(has by obj) 'lookup')
+      =/  inner  (~(got by obj) 'lookup')
+      ?>  ?=([%o *] inner)
+      [%lookup who=(slav %p (so:dejs:format (~(got by p.inner) 'who')))]
+    ?:  (~(has by obj) 'unlookup')
+      =/  inner  (~(got by obj) 'unlookup')
+      ?>  ?=([%o *] inner)
+      [%unlookup who=(slav %p (so:dejs:format (~(got by p.inner) 'who')))]
     !!
   --
 ++  grad  %noun

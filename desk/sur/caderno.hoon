@@ -40,6 +40,14 @@
       [%mount-log ~]
       [%commit-log ~]
       [%import-log ~]
+    ::  publishing / following over Gall subscription
+      [%publish id=@t]                                  ::  expose a local nb
+      [%unpublish id=@t]                                ::  stop exposing it
+      [%follow who=@p id=@t]                            ::  subscribe to a remote nb
+      [%unfollow who=@p id=@t]                          ::  drop a subscription
+      [%fork who=@p id=@t]                              ::  copy a follow into local nbs
+      [%lookup who=@p]                                  ::  browse a ship's catalog
+      [%unlookup who=@p]                                ::  stop browsing it
   ==
 
 +$  update
@@ -51,6 +59,13 @@
       [%cell-deleted id=cell-id]
       [%log-mounted ~]
       [%log-committed ~]
+    ::  which local nbs are public, and the remote nbs we follow
+      [%published ids=(set @t)]
+      [%follows items=(list [who=@p id=@t title=@t])]
+    ::  published-list: a ship's catalog served on /published-list.
+    ::  lookup: that catalog relayed to our own UI, tagged with the ship.
+      [%published-list items=(list [id=@t title=@t])]
+      [%lookup who=@p items=(list [id=@t title=@t])]
   ==
 
 ::  sole session state for shoe kernel delegation

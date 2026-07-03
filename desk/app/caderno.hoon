@@ -12,7 +12,19 @@
       counter=@ud
       hoon-subject=vase
   ==
-+$  versioned-state  $%([%4 state-4])
+::  state-5 adds notebook publishing over Gall subscription:
+::    published: local notebook ids exposed on /published/<id> (public)
+::    follows:   read-only mirrors of remote notebooks we subscribe to
++$  state-5
+  $:  nbs=(map @t notebook)
+      active=@t
+      ksession=(unit kernel-session)
+      counter=@ud
+      hoon-subject=vase
+      published=(set @t)
+      follows=(map [who=@p id=@t] notebook)
+  ==
++$  versioned-state  $%([%4 state-4] [%5 state-5])
 +$  card  card:agent:gall
 
 ++  find-cell
@@ -69,6 +81,21 @@
   |=  ns=(map @t notebook)
   ^-  (list [id=@t title=@t])
   (turn ~(tap by ns) |=([id=@t nb=notebook] [id title.nb]))
+::
+++  follows-items
+  |=  fs=(map [who=@p id=@t] notebook)
+  ^-  (list [who=@p id=@t title=@t])
+  (turn ~(tap by fs) |=([[who=@p id=@t] nb=notebook] [who id title.nb]))
+::
+++  published-catalog
+  ::  [id title] for each published notebook still present in nbs.
+  |=  [pub=(set @t) ns=(map @t notebook)]
+  ^-  (list [id=@t title=@t])
+  %+  murn  ~(tap in pub)
+  |=  id=@t
+  ^-  (unit [@t @t])
+  ?~  nb=(~(get by ns) id)  ~
+  `[id title.u.nb]
 
 ++  any-key
   ::  Returns any key from a non-null map.  Used when we need to pick a
@@ -283,12 +310,70 @@
     [%o (~(gas by *(map @t json)) ~[['log-mounted' [%b %.y]]])]
       %log-committed
     [%o (~(gas by *(map @t json)) ~[['log-committed' [%b %.y]]])]
+      %published
+    :-  %o
+    %-  ~(gas by *(map @t json))
+    ~[['published' [%a (turn ~(tap in ids.upd) |=(id=@t [%s id]))]]]
+      %follows
+    :-  %o
+    %-  ~(gas by *(map @t json))
+    :~  :-  'follows'
+        :-  %a
+        %+  turn  items.upd
+        |=  [who=@p id=@t title=@t]
+        :-  %o
+        %-  ~(gas by *(map @t json))
+        ~[['who' [%s (scot %p who)]] ['id' [%s id]] ['title' [%s title]]]
+    ==
+      %published-list
+    :-  %o
+    %-  ~(gas by *(map @t json))
+    ~[['published-list' [%a (turn items.upd catalog-item-to-json)]]]
+      %lookup
+    :-  %o
+    %-  ~(gas by *(map @t json))
+    :~  :-  'lookup'
+        :-  %o
+        %-  ~(gas by *(map @t json))
+        :~  ['who' [%s (scot %p who.upd)]]
+            ['items' [%a (turn items.upd catalog-item-to-json)]]
+    ==  ==
   ==
+::
+++  catalog-item-to-json
+  |=  [id=@t title=@t]
+  ^-  json
+  :-  %o
+  (~(gas by *(map @t json)) ~[['id' [%s id]] ['title' [%s title]]])
+::
+++  json-to-catalog
+  ::  parse a %published-list fact into [id title] pairs.
+  |=  j=json
+  ^-  (list [id=@t title=@t])
+  ?>  ?=([%o *] j)
+  =/  arr  (~(got by p.j) 'published-list')
+  ?>  ?=([%a *] arr)
+  %+  turn  p.arr
+  |=  it=json
+  ?>  ?=([%o *] it)
+  [(so:dejs:format (~(got by p.it) 'id')) (so:dejs:format (~(got by p.it) 'title'))]
 
 ++  broadcast
   |=  upd=update
   ^-  card
   [%give %fact [[%notebook ~] ~] %json !>((update-to-json upd))]
+::
+++  pub-fact
+  ::  push the full state of a published notebook to its /published/<id> subs.
+  |=  [id=@t nb=notebook]
+  ^-  card
+  [%give %fact ~[/published/[id]] %json !>((update-to-json [%state id nb]))]
+::
+++  catalog-fact
+  ::  push the published catalog to /published-list subscribers (lookers).
+  |=  [pub=(set @t) ns=(map @t notebook)]
+  ^-  card
+  [%give %fact ~[/published-list] %json !>((update-to-json [%published-list (published-catalog pub ns)]))]
 
 ++  flatten-effects
   |=  efx=sole-effect
@@ -325,12 +410,17 @@
       ['outputs' [%a (turn outputs.c output-to-json)]]
   ==
 
+::  nbformat: notebook schema version, stamped into every serialized notebook
+::  (wire + Clay log). Bump when the notebook shape changes; readers gate on it.
+++  nbformat  1
+::
 ++  notebook-to-json
   |=  nb=notebook
   ^-  json
   :-  %o
   %-  ~(gas by *(map @t json))
-  :~  ['title' [%s title.nb]]
+  :~  ['nbformat' [%n (scot %ud nbformat)]]
+      ['title' [%s title.nb]]
       ['kernel' [%s (scot %tas kernel.nb)]]
       ['cells' [%a (turn cells.nb cell-to-json)]]
   ==
@@ -375,6 +465,13 @@
   ^-  notebook
   ?>  ?=([%o *] j)
   =/  m   p.j
+  ::  gate on nbformat: absent means legacy (pre-versioning) = format 1; a
+  ::  newer format than we understand crashes here so callers skip/reject it
+  ::  rather than misparse a future schema.
+  =/  fmt=@ud
+    ?~  v=(~(get by m) 'nbformat')  1
+    (json-numb u.v)
+  ?>  (lte fmt nbformat)
   =/  cs  (~(got by m) 'cells')
   :*  cells=?>(?=([%a *] cs) (turn p.cs json-to-cell))
       kernel=`@tas`(so:dejs:format (~(got by m) 'kernel'))
@@ -393,7 +490,7 @@
   (json-to-notebook (~(got by m) 'nb'))
 --
 
-=|  state-4
+=|  state-5
 =*  state  -
 ^-  agent:gall
 %-  agent:dbug
@@ -403,9 +500,10 @@
 
 ++  on-init
   ^-  (quip card _this)
-  `this(nbs hoon-school-nbs, active 'hs-syntax', ksession ~, counter 100, hoon-subject fresh-subject)
+  `this(nbs hoon-school-nbs, active 'hs-syntax', ksession ~, counter 100, hoon-subject fresh-subject, published ~, follows ~)
 
-++  on-save  !>(`versioned-state`[%4 nbs active ksession counter hoon-subject])
+++  on-save
+  !>(`versioned-state`[%5 nbs active ksession counter hoon-subject published follows])
 
 ++  on-load
   |=  old=vase
@@ -413,13 +511,27 @@
   ::  Always reset hoon-subject: stored vases are stale after kernel upgrades.
   =/  try  (mule |.(!<(versioned-state old)))
   ?.  ?=(%& -.try)
-    `this(nbs (~(put by *(map @t notebook)) 'main' [~ %hoon 'untitled']), active 'main', ksession ~, counter 0, hoon-subject fresh-subject)
-  =/  s  +.p.try
+    `this(nbs (~(put by *(map @t notebook)) 'main' [~ %hoon 'untitled']), active 'main', ksession ~, counter 0, hoon-subject fresh-subject, published ~, follows ~)
+  ::  migrate any prior version up to state-5 (adds empty published/follows)
+  =/  s=state-5
+    ?-  -.p.try
+      %5  +.p.try
+      %4  =/  o=state-4  +.p.try
+          [nbs.o active.o ksession.o counter.o hoon-subject.o ~ ~]
+    ==
   =/  cleanup=(list card)
     ?~  ksession.s  ~
     ~[[%pass /caderno/session %agent [our.bowl agent.u.ksession.s] %leave ~]]
   :-  cleanup
-  this(nbs nbs.s, active active.s, ksession ~, counter counter.s, hoon-subject fresh-subject)
+  %=  this
+    nbs           nbs.s
+    active        active.s
+    ksession      ~
+    counter       counter.s
+    hoon-subject  fresh-subject
+    published     published.s
+    follows       follows.s
+  ==
 
 ++  on-poke
   |=  [=mark =vase]
@@ -428,7 +540,10 @@
       %cnb-action
     =/  act  !<(action vase)
     =/  nb  (need (~(get by nbs) active))
-    ?-  -.act
+    ::  run the action, then re-push the active notebook to its followers if it
+    ::  is published (all mutations target the active notebook).
+    =^  cards=(list card)  this
+      ?-  -.act
         %run-cell
       =/  id  id.act
       =/  c  (find-cell id cells.nb)
@@ -603,9 +718,21 @@
           (any-key new-nbs)
         active
       =/  new-active-nb  (need (~(get by new-nbs) new-active))
-      :_  this(nbs new-nbs, active new-active)
-      :~  (broadcast [%nb-list (nb-list-items new-nbs)])
-          (broadcast [%state new-active new-active-nb])
+      ::  deleting a published notebook implies unpublishing it: drop it from
+      ::  the set, kick its followers, and refresh the catalog for lookers.
+      =/  was-pub  (~(has in published) del-id)
+      =/  new-pub  (~(del in published) del-id)
+      :_  this(nbs new-nbs, active new-active, published new-pub)
+      %+  weld
+        ^-  (list card)
+        :~  (broadcast [%nb-list (nb-list-items new-nbs)])
+            (broadcast [%state new-active new-active-nb])
+        ==
+      ^-  (list card)
+      ?.  was-pub  ~
+      :~  [%give %kick ~[/published/[del-id]] ~]
+          (broadcast [%published new-pub])
+          (catalog-fact new-pub new-nbs)
       ==
         %mount-log
       ::  create %caderno-log desk and mount it to unix (idempotent)
@@ -671,7 +798,63 @@
       :~  (broadcast [%nb-list (nb-list-items merged)])
           (broadcast [%state new-active (need (~(get by merged) new-active))])
       ==
+    ::
+        %publish
+      ?.  (~(has by nbs) id.act)  `this
+      =/  pub  (~(put in published) id.act)
+      :_  this(published pub)
+      :~  (broadcast [%published pub])
+          (catalog-fact pub nbs)
+      ==
+    ::
+        %unpublish
+      =/  pub  (~(del in published) id.act)
+      :_  this(published pub)
+      :~  [%give %kick ~[/published/[id.act]] ~]
+          (broadcast [%published pub])
+          (catalog-fact pub nbs)
+      ==
+    ::
+        %lookup
+      :_  this
+      :~  :*  %pass  /lookup/(scot %p who.act)
+              %agent  [who.act %caderno]  %watch  /published-list
+      ==  ==
+    ::
+        %unlookup
+      :_  this
+      :~  :*  %pass  /lookup/(scot %p who.act)
+              %agent  [who.act %caderno]  %leave  ~
+      ==  ==
+    ::
+        %follow
+      :_  this
+      :~  :*  %pass  /follow/(scot %p who.act)/[id.act]
+              %agent  [who.act %caderno]  %watch  /published/[id.act]
+      ==  ==
+    ::
+        %unfollow
+      =/  fol  (~(del by follows) [who.act id.act])
+      :_  this(follows fol)
+      :~  :*  %pass  /follow/(scot %p who.act)/[id.act]
+              %agent  [who.act %caderno]  %leave  ~
+          ==
+          (broadcast [%follows (follows-items fol)])
+      ==
+    ::
+        %fork
+      ?~  fnb=(~(get by follows) [who.act id.act])  `this
+      =/  fid=@t   (rap 3 ~[id.act '-fork-' (scot %ud counter)])
+      =/  nbs2     (~(put by nbs) fid u.fnb)
+      :_  this(nbs nbs2, active fid, counter +(counter))
+      :~  (broadcast [%nb-list (nb-list-items nbs2)])
+          (broadcast [%state fid u.fnb])
+      ==
     ==
+    ::  re-push the active notebook to its /published/<id> followers
+    =?  cards  (~(has in published) active)
+      (snoc cards (pub-fact active (~(got by nbs) active)))
+    [cards this]
   ==
 
 ++  on-watch
@@ -679,11 +862,25 @@
   ^-  (quip card _this)
   ?+  path  (on-watch:def path)
       [%notebook ~]
+    ::  local UI subscription: seed list, active notebook, publish + follow state
     =/  nb  (need (~(get by nbs) active))
     :_  this
     :~  [%give %fact ~ %json !>((update-to-json [%nb-list (nb-list-items nbs)]))]
         [%give %fact ~ %json !>((update-to-json [%state active nb]))]
+        [%give %fact ~ %json !>((update-to-json [%published published]))]
+        [%give %fact ~ %json !>((update-to-json [%follows (follows-items follows)]))]
     ==
+    ::  remote follower subscription to a published notebook
+      [%published @ ~]
+    =/  id=@t  i.t.path
+    ?.  (~(has in published) id)
+      ~|(%caderno-not-published !!)
+    :_  this
+    ~[[%give %fact ~ %json !>((update-to-json [%state id (~(got by nbs) id)]))]]
+    ::  remote lookup subscription: serve (and live-update) the published catalog
+      [%published-list ~]
+    :_  this
+    ~[[%give %fact ~ %json !>((update-to-json [%published-list (published-catalog published nbs)]))]]
   ==
 
 ++  on-leave  on-leave:def
@@ -752,6 +949,49 @@
   |=  [=wire =sign:agent:gall]
   ^-  (quip card _this)
   ?+  wire  (on-agent:def wire sign)
+      [%lookup @ ~]
+    ::  a ship's published catalog (from %lookup); relay it to our UI
+    =/  who=@p  (slav %p i.t.wire)
+    ?+  -.sign  `this
+        %watch-ack
+      ?~  p.sign  `this
+      %-  (slog leaf+"caderno: lookup ~{(scow %p who)} failed" u.p.sign)
+      `this
+        %kick  `this
+        %fact
+      ?.  =(%json p.cage.sign)  `this
+      =/  try  (mule |.((json-to-catalog !<(json q.cage.sign))))
+      ?:  ?=(%| -.try)  `this
+      :_  this
+      ~[(broadcast [%lookup who p.try])]
+    ==
+      [%follow @ @ ~]
+    ::  updates from a remote notebook we follow; store a read-only mirror
+    =/  who=@p  (slav %p i.t.wire)
+    =/  id=@t   i.t.t.wire
+    ?+  -.sign  `this
+        %watch-ack
+      ?~  p.sign  `this
+      %-  (slog leaf+"caderno: follow ~{(scow %p who)}/{(trip id)} failed" u.p.sign)
+      =/  fol  (~(del by follows) [who id])
+      :_  this(follows fol)
+      ~[(broadcast [%follows (follows-items fol)])]
+        %kick
+      ::  publisher dropped us (unpublished or gone); forget the mirror
+      =/  fol  (~(del by follows) [who id])
+      :_  this(follows fol)
+      ~[(broadcast [%follows (follows-items fol)])]
+        %fact
+      ?.  =(%json p.cage.sign)  `this
+      =/  try  (mule |.((json-to-state !<(json q.cage.sign))))
+      ?:  ?=(%| -.try)
+        %-  (slog leaf+"caderno: bad follow fact" p.try)
+        `this
+      =/  nb  +.p.try
+      =/  fol  (~(put by follows) [who id] nb)
+      :_  this(follows fol)
+      ~[(broadcast [%follows (follows-items fol)])]
+    ==
       [%caderno %session ~]
     ?+  -.sign  `this
         %watch-ack

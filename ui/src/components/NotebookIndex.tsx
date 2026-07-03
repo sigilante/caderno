@@ -1,14 +1,17 @@
-import type { NbEntry } from '../App'
+import type { NbEntry, FollowEntry } from '../App'
 
 const SWATCHES = ['#cc88ff', '#6c8cff', '#ff8866', '#d9a441', '#66ccff', '#cc5a3a']
 
 interface Props {
   notebooks: NbEntry[]
+  follows: FollowEntry[]
   error: string | null
   onOpen: (id: string) => void
+  onFork: (who: string, id: string) => void
+  onUnfollow: (who: string, id: string) => void
 }
 
-export function NotebookIndex({ notebooks, error, onOpen }: Props) {
+export function NotebookIndex({ notebooks, follows, error, onOpen, onFork, onUnfollow }: Props) {
   // The backend lists notebooks in map-hash order; present them alphabetically
   // by title so the index is stable and scannable.
   const sorted = [...notebooks].sort((a, b) =>
@@ -82,6 +85,30 @@ export function NotebookIndex({ notebooks, error, onOpen }: Props) {
             </div>
           </div>
         ))}
+
+        {follows.length > 0 && (
+          <>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, margin: '30px 0 16px' }}>
+              <span style={{ fontSize: 22, fontWeight: 600, color: '#7fd4ff', letterSpacing: '.02em' }}>FOLLOWING</span>
+              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: '#4a6b7c', letterSpacing: '.18em' }}>READ-ONLY · REMOTE</span>
+            </div>
+            {follows.map(f => (
+              <div key={`${f.who}/${f.id}`} style={{ display: 'flex', alignItems: 'stretch', gap: 12, marginBottom: 10 }}>
+                <div style={{ flex: '0 0 150px', borderRadius: '0 0 0 22px', background: '#1c3040', color: '#7fd4ff', padding: '14px 18px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: '.08em', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.who}</span>
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: '.04em' }}>{f.id}</span>
+                </div>
+                <div style={{ flex: 1, background: '#0c0c0e', border: '1px solid #14202a', borderRadius: '0 22px 22px 0', padding: '14px 22px', display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ fontFamily: "'Antonio', sans-serif", fontSize: 25, fontWeight: 600, color: '#bfe8ff' }}>{f.title}</div>
+                  <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+                    <span className="lc-press" onClick={() => onFork(f.who, f.id)} title="Copy into an editable local notebook" style={{ background: '#2a2438', color: '#b79ae0', borderRadius: 16, padding: '7px 14px', fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 700 }}>FORK</span>
+                    <span className="lc-press" onClick={() => onUnfollow(f.who, f.id)} title="Stop following" style={{ background: '#2a1414', color: '#e0a0a0', borderRadius: 16, padding: '7px 14px', fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 700 }}>✕</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </>
+        )}
       </div>
     </div>
   )
