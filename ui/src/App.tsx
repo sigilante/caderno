@@ -565,6 +565,7 @@ export default function App() {
             follows={state.follows}
             onLookupShip={onLookupShip}
             onFollow={onFollow}
+            onBack={() => dispatch({ type: 'set-view', view: 'list' })}
           />
         ) : (
           <NotebookIndex

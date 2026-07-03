@@ -6,9 +6,10 @@ interface Props {
   follows: FollowEntry[]
   onLookupShip: (who: string) => void
   onFollow: (who: string, id: string) => void
+  onBack: () => void
 }
 
-export function LookupView({ lookup, follows, onLookupShip, onFollow }: Props) {
+export function LookupView({ lookup, follows, onLookupShip, onFollow, onBack }: Props) {
   const [ship, setShip] = useState('')
   const submit = () => onLookupShip(ship)
   const following = new Set(follows.map(f => `${f.who}/${f.id}`))
@@ -20,6 +21,7 @@ export function LookupView({ lookup, follows, onLookupShip, onFollow }: Props) {
     >
       <div style={{ padding: '6px 24px 60px' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, margin: '4px 0 22px' }}>
+          <span className="lc-press" onClick={onBack} title="Back to the notebook index" style={{ color: '#d9a441', fontSize: 26, fontWeight: 700, lineHeight: 1 }}>◂</span>
           <span style={{ fontSize: 30, fontWeight: 600, color: '#7fd4ff', letterSpacing: '.02em' }}>LOOKUP</span>
           <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: '#4a6b7c', letterSpacing: '.18em' }}>BROWSE A SHIP'S PUBLISHED NOTEBOOKS</span>
         </div>
