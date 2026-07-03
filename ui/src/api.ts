@@ -47,6 +47,7 @@ export type Update =
   | { 'log-committed': boolean }
   | { 'published': string[] }
   | { 'follows': { who: string; id: string; title: string }[] }
+  | { 'lookup': { who: string; items: { id: string; title: string }[] } }
 
 let channelId = `caderno-${Date.now()}`
 let eventSource: EventSource | null = null
@@ -193,4 +194,6 @@ export const actions = {
   follow: (who: string, id: string) => poke({ 'follow': { who, id } }),
   unfollow: (who: string, id: string) => poke({ 'unfollow': { who, id } }),
   fork: (who: string, id: string) => poke({ 'fork': { who, id } }),
+  lookup: (who: string) => poke({ 'lookup': { who } }),
+  unlookup: (who: string) => poke({ 'unlookup': { who } }),
 }

@@ -5,11 +5,12 @@ import {
 } from './api'
 import { NotebookIndex } from './components/NotebookIndex'
 import { NotebookView } from './components/NotebookView'
+import { LookupView } from './components/LookupView'
 
 // ── state ────────────────────────────────────────────────────────────────────
 
 type AppState = {
-  view: 'list' | 'nb'
+  view: 'list' | 'nb' | 'lookup'
   active: string | null
   notebooks: NbEntry[]
   channelOpen: boolean
@@ -21,9 +22,11 @@ type AppState = {
   kernels: string[]  // available kernels: in-process 'hoon' + discovered shoe agents
   published: string[]  // local notebook ids exposed to followers
   follows: FollowEntry[]  // read-only remote notebooks we subscribe to
+  lookup: { who: string; items: CatalogEntry[] } | null  // current by-ship lookup result
 }
 
 export type FollowEntry = { who: string; id: string; title: string }
+export type CatalogEntry = { id: string; title: string }
 
 export type NbEntry = {
   id: string
@@ -89,7 +92,7 @@ type Action =
   | { type: 'log-mounted' }
   | { type: 'log-committed' }
   | { type: 'error'; msg: string }
-  | { type: 'set-view'; view: 'list' | 'nb'; id?: string }
+  | { type: 'set-view'; view: 'list' | 'nb' | 'lookup'; id?: string }
   | { type: 'set-kernel'; kernel: string }
   | { type: 'set-src'; id: number; src: string }
   | { type: 'toggle-edit'; id: number }
@@ -102,6 +105,7 @@ type Action =
   | { type: 'set-kernels'; kernels: string[] }
   | { type: 'set-published'; published: string[] }
   | { type: 'set-follows'; follows: FollowEntry[] }
+  | { type: 'set-lookup'; who: string; items: CatalogEntry[] }
 
 function reducer(state: AppState, action: Action): AppState {
   const activeNb = () => state.notebooks.find(n => n.id === state.active) ?? null
@@ -214,6 +218,8 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, published: action.published }
     case 'set-follows':
       return { ...state, follows: action.follows }
+    case 'set-lookup':
+      return { ...state, lookup: { who: action.who, items: action.items } }
     default: return state
   }
 }
@@ -242,7 +248,7 @@ const kernelColor = (k: string) => KERNEL_COLORS[k] ?? '#6c8cff'
 
 export default function App() {
   const [state, dispatch] = useReducer(reducer, {
-    view: 'list', active: null, notebooks: [], channelOpen: false, logMounted: false, error: null, running: new Set<number>(), kelvins: null, soleSessions: null, kernels: ['hoon'], published: [], follows: [],
+    view: 'list', active: null, notebooks: [], channelOpen: false, logMounted: false, error: null, running: new Set<number>(), kelvins: null, soleSessions: null, kernels: ['hoon'], published: [], follows: [], lookup: null,
   })
   const stateRef = useRef(state)
   stateRef.current = state
@@ -258,6 +264,7 @@ export default function App() {
     else if ('log-committed' in upd) dispatch({ type: 'log-committed' })
     else if ('published' in upd)     dispatch({ type: 'set-published', published: upd['published'] })
     else if ('follows' in upd)       dispatch({ type: 'set-follows', follows: upd['follows'] })
+    else if ('lookup' in upd)        dispatch({ type: 'set-lookup', who: upd['lookup'].who, items: upd['lookup'].items })
   }, [])
 
   useEffect(() => {
@@ -336,13 +343,13 @@ export default function App() {
     if (state.published.includes(id)) actions.unpublish(id)
     else actions.publish(id)
   }
-  const onFollow = () => {
-    const who = window.prompt('Publisher ship (e.g. ~sampel-palnet):')?.trim()
+  const onOpenLookup = () => dispatch({ type: 'set-view', view: 'lookup' })
+  const onLookupShip = (raw: string) => {
+    const who = raw.trim()
     if (!who) return
-    const id = window.prompt('Notebook id to follow:')?.trim()
-    if (!id) return
-    actions.follow(who.startsWith('~') ? who : `~${who}`, id)
+    actions.lookup(who.startsWith('~') ? who : `~${who}`)
   }
+  const onFollow = (who: string, id: string) => { actions.follow(who, id) }
   const onUnfollow = (who: string, id: string) => { actions.unfollow(who, id) }
   const onFork = (who: string, id: string) => {
     actions.fork(who, id)
@@ -490,10 +497,10 @@ export default function App() {
               >◂ IMPORT</div>
               <div
                 className="lc-press"
-                onClick={onFollow}
-                title="Subscribe to a published notebook on another ship"
+                onClick={onOpenLookup}
+                title="Browse another ship's published notebooks"
                 style={{ height: 50, borderRadius: '0 30px 30px 0', background: '#1c3040', color: '#7fd4ff', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 15, letterSpacing: '.03em' }}
-              >+ FOLLOW</div>
+              >◈ LOOKUP</div>
             </>
           )}
 
@@ -551,6 +558,13 @@ export default function App() {
             onAddCode={onAddCode}
             onSetCellType={onSetCellType}
             onRename={onRename}
+          />
+        ) : state.view === 'lookup' ? (
+          <LookupView
+            lookup={state.lookup}
+            follows={state.follows}
+            onLookupShip={onLookupShip}
+            onFollow={onFollow}
           />
         ) : (
           <NotebookIndex

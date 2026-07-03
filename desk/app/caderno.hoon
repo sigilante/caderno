@@ -86,6 +86,16 @@
   |=  fs=(map [who=@p id=@t] notebook)
   ^-  (list [who=@p id=@t title=@t])
   (turn ~(tap by fs) |=([[who=@p id=@t] nb=notebook] [who id title.nb]))
+::
+++  published-catalog
+  ::  [id title] for each published notebook still present in nbs.
+  |=  [pub=(set @t) ns=(map @t notebook)]
+  ^-  (list [id=@t title=@t])
+  %+  murn  ~(tap in pub)
+  |=  id=@t
+  ^-  (unit [@t @t])
+  ?~  nb=(~(get by ns) id)  ~
+  `[id title.u.nb]
 
 ++  any-key
   ::  Returns any key from a non-null map.  Used when we need to pick a
@@ -315,7 +325,38 @@
         %-  ~(gas by *(map @t json))
         ~[['who' [%s (scot %p who)]] ['id' [%s id]] ['title' [%s title]]]
     ==
+      %published-list
+    :-  %o
+    %-  ~(gas by *(map @t json))
+    ~[['published-list' [%a (turn items.upd catalog-item-to-json)]]]
+      %lookup
+    :-  %o
+    %-  ~(gas by *(map @t json))
+    :~  :-  'lookup'
+        :-  %o
+        %-  ~(gas by *(map @t json))
+        :~  ['who' [%s (scot %p who.upd)]]
+            ['items' [%a (turn items.upd catalog-item-to-json)]]
+    ==  ==
   ==
+::
+++  catalog-item-to-json
+  |=  [id=@t title=@t]
+  ^-  json
+  :-  %o
+  (~(gas by *(map @t json)) ~[['id' [%s id]] ['title' [%s title]]])
+::
+++  json-to-catalog
+  ::  parse a %published-list fact into [id title] pairs.
+  |=  j=json
+  ^-  (list [id=@t title=@t])
+  ?>  ?=([%o *] j)
+  =/  arr  (~(got by p.j) 'published-list')
+  ?>  ?=([%a *] arr)
+  %+  turn  p.arr
+  |=  it=json
+  ?>  ?=([%o *] it)
+  [(so:dejs:format (~(got by p.it) 'id')) (so:dejs:format (~(got by p.it) 'title'))]
 
 ++  broadcast
   |=  upd=update
@@ -327,6 +368,12 @@
   |=  [id=@t nb=notebook]
   ^-  card
   [%give %fact ~[/published/[id]] %json !>((update-to-json [%state id nb]))]
+::
+++  catalog-fact
+  ::  push the published catalog to /published-list subscribers (lookers).
+  |=  [pub=(set @t) ns=(map @t notebook)]
+  ^-  card
+  [%give %fact ~[/published-list] %json !>((update-to-json [%published-list (published-catalog pub ns)]))]
 
 ++  flatten-effects
   |=  efx=sole-effect
@@ -671,9 +718,21 @@
           (any-key new-nbs)
         active
       =/  new-active-nb  (need (~(get by new-nbs) new-active))
-      :_  this(nbs new-nbs, active new-active)
-      :~  (broadcast [%nb-list (nb-list-items new-nbs)])
-          (broadcast [%state new-active new-active-nb])
+      ::  deleting a published notebook implies unpublishing it: drop it from
+      ::  the set, kick its followers, and refresh the catalog for lookers.
+      =/  was-pub  (~(has in published) del-id)
+      =/  new-pub  (~(del in published) del-id)
+      :_  this(nbs new-nbs, active new-active, published new-pub)
+      %+  weld
+        ^-  (list card)
+        :~  (broadcast [%nb-list (nb-list-items new-nbs)])
+            (broadcast [%state new-active new-active-nb])
+        ==
+      ^-  (list card)
+      ?.  was-pub  ~
+      :~  [%give %kick ~[/published/[del-id]] ~]
+          (broadcast [%published new-pub])
+          (catalog-fact new-pub new-nbs)
       ==
         %mount-log
       ::  create %caderno-log desk and mount it to unix (idempotent)
@@ -744,14 +803,29 @@
       ?.  (~(has by nbs) id.act)  `this
       =/  pub  (~(put in published) id.act)
       :_  this(published pub)
-      ~[(broadcast [%published pub])]
+      :~  (broadcast [%published pub])
+          (catalog-fact pub nbs)
+      ==
     ::
         %unpublish
       =/  pub  (~(del in published) id.act)
       :_  this(published pub)
       :~  [%give %kick ~[/published/[id.act]] ~]
           (broadcast [%published pub])
+          (catalog-fact pub nbs)
       ==
+    ::
+        %lookup
+      :_  this
+      :~  :*  %pass  /lookup/(scot %p who.act)
+              %agent  [who.act %caderno]  %watch  /published-list
+      ==  ==
+    ::
+        %unlookup
+      :_  this
+      :~  :*  %pass  /lookup/(scot %p who.act)
+              %agent  [who.act %caderno]  %leave  ~
+      ==  ==
     ::
         %follow
       :_  this
@@ -803,6 +877,10 @@
       ~|(%caderno-not-published !!)
     :_  this
     ~[[%give %fact ~ %json !>((update-to-json [%state id (~(got by nbs) id)]))]]
+    ::  remote lookup subscription: serve (and live-update) the published catalog
+      [%published-list ~]
+    :_  this
+    ~[[%give %fact ~ %json !>((update-to-json [%published-list (published-catalog published nbs)]))]]
   ==
 
 ++  on-leave  on-leave:def
@@ -871,6 +949,22 @@
   |=  [=wire =sign:agent:gall]
   ^-  (quip card _this)
   ?+  wire  (on-agent:def wire sign)
+      [%lookup @ ~]
+    ::  a ship's published catalog (from %lookup); relay it to our UI
+    =/  who=@p  (slav %p i.t.wire)
+    ?+  -.sign  `this
+        %watch-ack
+      ?~  p.sign  `this
+      %-  (slog leaf+"caderno: lookup ~{(scow %p who)} failed" u.p.sign)
+      `this
+        %kick  `this
+        %fact
+      ?.  =(%json p.cage.sign)  `this
+      =/  try  (mule |.((json-to-catalog !<(json q.cage.sign))))
+      ?:  ?=(%| -.try)  `this
+      :_  this
+      ~[(broadcast [%lookup who p.try])]
+    ==
       [%follow @ @ ~]
     ::  updates from a remote notebook we follow; store a read-only mirror
     =/  who=@p  (slav %p i.t.wire)

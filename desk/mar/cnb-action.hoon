@@ -104,6 +104,14 @@
       :+  %fork
         who=(slav %p (so:dejs:format (~(got by im) 'who')))
       id=(so:dejs:format (~(got by im) 'id'))
+    ?:  (~(has by obj) 'lookup')
+      =/  inner  (~(got by obj) 'lookup')
+      ?>  ?=([%o *] inner)
+      [%lookup who=(slav %p (so:dejs:format (~(got by p.inner) 'who')))]
+    ?:  (~(has by obj) 'unlookup')
+      =/  inner  (~(got by obj) 'unlookup')
+      ?>  ?=([%o *] inner)
+      [%unlookup who=(slav %p (so:dejs:format (~(got by p.inner) 'who')))]
     !!
   --
 ++  grad  %noun
