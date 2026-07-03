@@ -250,7 +250,23 @@ function renderMd(src: string, accent: string): string {
   const esc = (x: string) => x.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
   // Only allow safe link schemes; block javascript:/data:/vbscript: etc.
   const safeHref = (h: string) => /^(?:https?:\/\/|mailto:|\/|#)/i.test(h.trim()) ? h : '#'
+  // Images travel embedded in published notebooks: allow raster data: URIs
+  // (self-contained) and https/relative URLs. Block data:image/svg+xml — SVG is
+  // an executable document — and every other scheme.
+  const safeSrc = (s: string) => {
+    const t = s.trim()
+    if (/^data:image\/(?:png|jpe?g|gif|webp);/i.test(t)) return t
+    if (/^(?:https:\/\/|\/)/i.test(t)) return t
+    return ''
+  }
   const inl = (x: string) => esc(x)
+    // image before link (![..](..) is a superset of the link pattern)
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_m: string, alt: string, s: string) => {
+      const safe = safeSrc(s)
+      return safe
+        ? `<img src="${safe}" alt="${alt}" loading="lazy" style="max-width:100%;border-radius:6px;margin:6px 0;border:1px solid #1a1814" />`
+        : '<span style="color:#cc5a3a;font-family:monospace;font-size:.82em">[blocked image]</span>'
+    })
     .replace(/\*\*([^*]+)\*\*/g, `<b style="color:${accent};font-weight:700">$1</b>`)
     .replace(/`([^`]+)`/g, `<code style="font-family:'JetBrains Mono',monospace;background:#1d1712;color:${accent};padding:1px 6px;border-radius:4px;font-size:.84em">$1</code>`)
     .replace(/\*([^*]+)\*/g, '<i style="color:#e9c9a0">$1</i>')
@@ -270,7 +286,25 @@ function renderMd(src: string, accent: string): string {
     codeLines = []
   }
 
-  for (const ln of lines) {
+  // markdown tables: a |header| row, a |---|---| separator, then |body| rows
+  const rowCells = (r: string) => r.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim())
+  const isTableSep = (s: string) => /-/.test(s) && /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(s)
+
+  for (let i = 0; i < lines.length; i++) {
+    const ln = lines[i]
+    if (!inCode && /^\s*\|.*\|\s*$/.test(ln) && i + 1 < lines.length && isTableSep(lines[i + 1])) {
+      closeLists()
+      const header = rowCells(ln)
+      let j = i + 2
+      const body: string[][] = []
+      while (j < lines.length && /^\s*\|.*\|\s*$/.test(lines[j])) { body.push(rowCells(lines[j])); j++ }
+      const cs = 'padding:5px 12px;border:1px solid #2c2820;text-align:left;line-height:1.4'
+      const ths = header.map(c => `<th style="${cs};color:${accent};font-weight:700">${inl(c)}</th>`).join('')
+      const trs = body.map(r => `<tr>${r.map(c => `<td style="${cs};color:#d8c4a0">${inl(c)}</td>`).join('')}</tr>`).join('')
+      html += `<table style="border-collapse:collapse;margin:10px 0;font-size:.88em"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`
+      i = j - 1
+      continue
+    }
     if (/^```/.test(ln)) {
       if (!inCode) { closeLists(); inCode = true; codeLines = [] }
       else { flushCode(); inCode = false }
