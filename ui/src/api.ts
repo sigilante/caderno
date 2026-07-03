@@ -119,7 +119,7 @@ export async function fetchLogStatus(): Promise<boolean> {
   }
 }
 
-export interface Kelvins { hoon: number; arvo: number; zuse: number; nock: number; port: number }
+export interface Kelvins { hoon: number; arvo: number; zuse: number; nock: number; port: number; caderno_hash?: string; base_hash?: string }
 
 export interface SoleSession {
   ship: string

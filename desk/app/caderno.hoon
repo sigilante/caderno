@@ -933,6 +933,12 @@
         ?~  q.p.eh  80
         u.q.p.eh
       80
+    ::  real desk commit hashes (mule-guarded; %$ if unreadable)
+    =/  hash
+      |=  =desk
+      ^-  @t
+      =/  h  (mule |.(.^(@uv %cz /(scot %p our.bowl)/[desk]/(scot %da now.bowl))))
+      ?:(?=(%| -.h) '' (scot %uv p.h))
     =/  kels=json
       :-  %o
       %-  ~(gas by *(map @t json))
@@ -941,6 +947,8 @@
           ['zuse' [%n (scot %ud zuse-kel)]]
           ['nock' [%n '4']]
           ['port' (numb:enjs:format port)]
+          ['caderno_hash' [%s (hash %caderno)]]
+          ['base_hash' [%s (hash %base)]]
       ==
     ``[%json !>(kels)]
   ==
