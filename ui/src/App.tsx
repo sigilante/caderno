@@ -522,7 +522,7 @@ export default function App() {
             </div>
             <div>
               <div style={{ color: '#6b5a3c', fontSize: 10, letterSpacing: '.2em' }}>KERNEL</div>
-              <div style={{ color: '#cc88ff', fontSize: 18, fontWeight: 500 }}>{(activeNb?.kernel ?? 'NORTH').toUpperCase()}</div>
+              <div style={{ color: '#cc88ff', fontSize: 18, fontWeight: 500 }}>{(activeNb?.kernel ?? 'hoon').toUpperCase()}</div>
             </div>
             <div>
               <div style={{ color: '#6b5a3c', fontSize: 10, letterSpacing: '.2em' }}>CHANNEL</div>
@@ -596,6 +596,11 @@ export default function App() {
   )
 }
 
+// Last 5 base32 chars of a `0v…` desk hash (matches +vats "hash ends in").
+function shortHash(h?: string): string {
+  return h ? h.replace(/\./g, '').slice(-5) : '·····'
+}
+
 function RightRail({ channelOpen, kelvins }: { channelOpen: boolean; kelvins: Kelvins | null }) {
   const kv = kelvins ?? { zuse: 409, arvo: 235, hoon: 136, nock: 4, port: parseInt(window.location.port) || 80 }
   return (
@@ -629,9 +634,9 @@ function RightRail({ channelOpen, kelvins }: { channelOpen: boolean; kelvins: Ke
       {/* MARK */}
       <div style={{ background: '#0c0c0e', border: '1px solid #1a1814', padding: '11px 15px', color: '#5a4a2c', fontSize: 10, lineHeight: 1.5, letterSpacing: '.02em' }}>
         <div style={{ color: '#6b5a3c', fontSize: 9, letterSpacing: '.2em', marginBottom: 6 }}>MARK</div>
-        <div style={{ color: '#9a8458' }}>%cnb-action</div>
-        <div style={{ color: '#9a8458' }}>%cnb-update</div>
-        <div style={{ marginTop: 4, color: '#5a8a5f' }}>fact · %json SSE</div>
+        <div style={{ color: '#9a8458' }}>%cnb-action ▸ poke</div>
+        <div style={{ color: '#9a8458' }}>%json ▸ fact</div>
+        <div style={{ marginTop: 4, color: '#5a8a5f' }}>SSE · /notebook</div>
       </div>
 
       <div style={{ flex: 1 }} />
@@ -641,11 +646,11 @@ function RightRail({ channelOpen, kelvins }: { channelOpen: boolean; kelvins: Ke
         <div style={{ color: '#6b5a3c', fontSize: 9, letterSpacing: '.2em', marginBottom: 9 }}>DESK HASH</div>
         <div style={{ margin: '6px 0' }}>
           <div style={{ color: '#cc88ff', fontSize: 13, fontWeight: 700 }}>%caderno</div>
-          <div style={{ color: '#6b5a3c', fontSize: 11 }}>9df1c</div>
+          <div style={{ color: '#6b5a3c', fontSize: 11 }}>{shortHash(kv.caderno_hash)}</div>
         </div>
         <div style={{ margin: '6px 0' }}>
           <div style={{ color: '#d9a441', fontSize: 13, fontWeight: 700 }}>%base</div>
-          <div style={{ color: '#6b5a3c', fontSize: 11 }}>6f05p</div>
+          <div style={{ color: '#6b5a3c', fontSize: 11 }}>{shortHash(kv.base_hash)}</div>
         </div>
       </div>
     </div>
