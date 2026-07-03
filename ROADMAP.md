@@ -30,7 +30,7 @@ The session client lives in `app/caderno.hoon` and needs:
 1. **Subscribe**: on `%set-kernel` to a shoe agent, subscribe `/sole/~our/session-name`
 2. **Send input**: poke the shoe agent with `%sole-action [%det ler=clock source=cell-src]` — the vector clock `ler` is `[own=their-clock his=our-clock]`
 3. **Collect output**: on `%sole-effect` facts, collect `%blit` effects until a prompt blit arrives (signals completion), then assemble the output and emit a `%cell-output` update
-4. **Session discovery**: the `/x/sole/sessions` scry (PR #7379) returns active session names; use this to populate the shoe session to attach to
+4. **Session discovery**: the `/x/sole/sessions` scry (PR #7379) returns a `%sole-sessions`-marked `(set sole-id)`, castable to JSON (array of `{ship, session}`) or noun; use this to populate the shoe session to attach to
 
 Key types from `sur/sole.hoon`:
 - `sole-clock=[own=@ud his=@ud]`
@@ -65,9 +65,10 @@ Currently one notebook per ship. To support multiple:
 
 ### PR #7379
 
-[urbit/urbit#7379](https://github.com/urbit/urbit/pull/7379) — adds `/x/sole/sessions` scry to `lib/shoe.hoon`. Until merged:
+[urbit/urbit#7379](https://github.com/urbit/urbit/pull/7379) — adds `/x/sole/sessions` scry to `lib/shoe.hoon`, backed by a new `%sole-sessions` mark (`mar/sole/sessions.hoon`) that owns the JSON conversion. Until merged:
 - Kernel pills for North/Dojo appear dimmed on ships without the patch
-- The locally patched `nec/base/lib/shoe.hoon` (committed via `|commit %base`) works on ~nec
+- The locally patched `nec/base/lib/shoe.hoon` + `nec/base/mar/sole/sessions.hoon` (committed via `|commit %base`) work on ~nec
+- Dojo does not expose this scry — it has its own bespoke on-peek stub, unrelated to `/lib/shoe`
 
 Once merged and deployed, kernel discovery works everywhere without any local patch.
 
