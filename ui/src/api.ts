@@ -104,9 +104,14 @@ export async function fetchLogStatus(): Promise<boolean> {
 
 export interface Kelvins { hoon: number; arvo: number; zuse: number; nock: number; port: number }
 
-export async function fetchSoleSessions(agent: string): Promise<string[] | null> {
+export interface SoleSession {
+  ship: string
+  session: string
+}
+
+export async function fetchSoleSessions(agent: string): Promise<SoleSession[] | null> {
   try {
-    const res = await fetch(`/~/scry/${agent}/sole/sessions/json`, { credentials: 'include' })
+    const res = await fetch(`/~/scry/${agent}/sole/sessions.json`, { credentials: 'include' })
     if (!res.ok) return null
     return res.json()
   } catch {
