@@ -1,5 +1,19 @@
 // Urbit Eyre channel API client for caderno
 
+// Our ship, i.e. the ship serving this app (without the leading '~').
+// Eyre sets a non-HttpOnly `urbauth-~ship` cookie on the served page, so the
+// ship name is readable client-side. Fall back to an injected window.ship, then
+// to 'nec' for local dev.
+export function getShip(): string {
+  const m = document.cookie.match(/urbauth-~([a-z-]+)=/)
+  if (m) return m[1]
+  const w = (window as any).ship
+  if (typeof w === 'string' && w) return w
+  return 'nec'
+}
+
+export const ship: string = getShip()
+
 export interface Output {
   text?: string
   ename?: string
@@ -50,7 +64,7 @@ export async function openChannel(onUpdate: (upd: Update) => void, onOpen?: () =
   await channelPut([{
     id: messageId++,
     action: 'subscribe',
-    ship: (window as any).ship ?? 'nec',
+    ship,
     app: 'caderno',
     path: '/notebook',
   }])
@@ -76,7 +90,7 @@ function mkPoke(data: object) {
   return {
     id: messageId++,
     action: 'poke' as const,
-    ship: ((window as any).ship ?? 'nec') as string,
+    ship,
     app: 'caderno',
     mark: 'cnb-action',
     json: data,
@@ -117,6 +131,28 @@ export async function fetchSoleSessions(agent: string): Promise<SoleSession[] | 
   } catch {
     return null
   }
+}
+
+// All running gall agents on the ship (across desks). %ge enumeration isn't
+// reachable over the %gx /~/scry endpoint, so caderno surfaces it for us.
+export async function fetchAgents(): Promise<string[]> {
+  try {
+    const res = await fetch('/~/scry/caderno/agents.json', { credentials: 'include' })
+    if (!res.ok) return []
+    return res.json()
+  } catch {
+    return []
+  }
+}
+
+// Discover shoe REPL kernels: probe each running agent with the shoe
+// /x/sole/sessions scry (a non-shoe agent 404s → null), keeping those that
+// answer. The in-process 'hoon' kernel is prepended and is not an agent.
+export async function discoverKernels(): Promise<string[]> {
+  const agents = await fetchAgents()
+  const flags = await Promise.all(agents.map(a => fetchSoleSessions(a).then(r => r !== null)))
+  const shoe = agents.filter((_, i) => flags[i]).sort()
+  return ['hoon', ...shoe]
 }
 
 export async function fetchKelvins(): Promise<Kelvins> {

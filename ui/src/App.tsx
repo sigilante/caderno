@@ -1,7 +1,7 @@
 import { useEffect, useReducer, useCallback, useRef } from 'react'
 import {
-  fetchActiveNotebook, fetchKelvins, fetchLogStatus, openChannel, closeChannel, actions,
-  type Notebook, type Cell, type Output, type Update, type Kelvins,
+  fetchActiveNotebook, fetchKelvins, fetchLogStatus, fetchSoleSessions, discoverKernels, openChannel, closeChannel, actions, ship,
+  type Notebook, type Cell, type Output, type Update, type Kelvins, type SoleSession,
 } from './api'
 import { NotebookIndex } from './components/NotebookIndex'
 import { NotebookView } from './components/NotebookView'
@@ -17,6 +17,8 @@ type AppState = {
   error: string | null
   running: Set<number>
   kelvins: Kelvins | null
+  soleSessions: SoleSession[] | null  // active sole sessions on the current shoe kernel, null if kernel is in-process (hoon)
+  kernels: string[]  // available kernels: in-process 'hoon' + discovered shoe agents
 }
 
 export type NbEntry = {
@@ -92,6 +94,8 @@ type Action =
   | { type: 'rename-nb'; title: string }
   | { type: 'set-kelvins'; kelvins: Kelvins }
   | { type: 'set-log-mounted'; mounted: boolean }
+  | { type: 'set-sole-sessions'; sessions: SoleSession[] | null }
+  | { type: 'set-kernels'; kernels: string[] }
 
 function reducer(state: AppState, action: Action): AppState {
   const activeNb = () => state.notebooks.find(n => n.id === state.active) ?? null
@@ -196,6 +200,10 @@ function reducer(state: AppState, action: Action): AppState {
     }
     case 'set-kelvins':
       return { ...state, kelvins: action.kelvins }
+    case 'set-sole-sessions':
+      return { ...state, soleSessions: action.sessions }
+    case 'set-kernels':
+      return { ...state, kernels: action.kernels }
     default: return state
   }
 }
@@ -218,9 +226,13 @@ function insertAfterCell(cells: CellEntry[], after: number, newCell: CellEntry):
 
 // ── component ────────────────────────────────────────────────────────────────
 
+// LCARS accent per kernel; unknown discovered agents get the neutral blue.
+const KERNEL_COLORS: Record<string, string> = { hoon: '#cc88ff', north: '#ff9900' }
+const kernelColor = (k: string) => KERNEL_COLORS[k] ?? '#6c8cff'
+
 export default function App() {
   const [state, dispatch] = useReducer(reducer, {
-    view: 'list', active: null, notebooks: [], channelOpen: false, logMounted: false, error: null, running: new Set<number>(), kelvins: null,
+    view: 'list', active: null, notebooks: [], channelOpen: false, logMounted: false, error: null, running: new Set<number>(), kelvins: null, soleSessions: null, kernels: ['hoon', 'north'],
   })
   const stateRef = useRef(state)
   stateRef.current = state
@@ -250,7 +262,49 @@ export default function App() {
     return () => { closeChannel() }
   }, [handleUpdate])
 
+  // Discover available kernels once: in-process 'hoon' + running agents that
+  // answer the shoe /x/sole/sessions probe. Falls back to the ['hoon','north']
+  // default if discovery yields nothing (e.g. offline).
+  useEffect(() => {
+    let cancelled = false
+    discoverKernels()
+      .then(kernels => { if (!cancelled && kernels.length > 1) dispatch({ type: 'set-kernels', kernels }) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
   const activeNb = state.notebooks.find(n => n.id === state.active) ?? null
+
+  // A shoe kernel is any external agent (e.g. north); 'hoon' evaluates in-process
+  // and has no sole sessions. Poll the kernel agent's /x/sole/sessions scry while
+  // its notebook is open so the SESSIONS panel stays live as the backend spawns them.
+  //
+  // A %sole agent multiplexes sessions from every client that drives it, keyed only
+  // by an opaque [who=@p ses=@ta] with no app-ownership field. Caderno opens sessions
+  // named 'caderno' (see caderno.hoon), so we filter to our ship + that name prefix to
+  // show only caderno's sessions and drop foreign ones (e.g. jupytur-*). The '-' prefix
+  // match is forward-compatible with per-notebook naming (caderno-<id>).
+  const shoeKernel = state.view === 'nb' && activeNb && activeNb.kernel !== 'hoon' ? activeNb.kernel : null
+
+  // Kernel picker options: discovered kernels, always including the active
+  // notebook's own kernel so a saved-but-undiscovered kernel stays selectable.
+  const kernelList = activeNb && !state.kernels.includes(activeNb.kernel)
+    ? [...state.kernels, activeNb.kernel]
+    : state.kernels
+  useEffect(() => {
+    if (!shoeKernel) { dispatch({ type: 'set-sole-sessions', sessions: null }); return }
+    let cancelled = false
+    const load = () => fetchSoleSessions(shoeKernel)
+      .then(all => {
+        const mine = all && all.filter(s =>
+          s.ship === ship && (s.session === 'caderno' || s.session.startsWith('caderno-')))
+        if (!cancelled) dispatch({ type: 'set-sole-sessions', sessions: mine ?? null })
+      })
+      .catch(() => {})
+    load()
+    const iv = setInterval(load, 5000)
+    return () => { cancelled = true; clearInterval(iv) }
+  }, [shoeKernel])
 
   // callbacks
   const onSetKernel = (k: string) => { dispatch({ type: 'set-kernel', kernel: k }); actions.setKernel(k) }
@@ -321,7 +375,7 @@ export default function App() {
         <div style={{ position: 'absolute', top: 10, left: 255, right: 10, height: 96, background: '#ff9900', borderRadius: '0 18px 18px 18px', display: 'flex', alignItems: 'center', padding: '0 30px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', lineHeight: .92 }}>
             <span style={{ fontSize: 42, fontWeight: 700, color: '#000', letterSpacing: '-.01em' }}>caderno</span>
-            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#3a2400', letterSpacing: '.34em', marginTop: 3 }}>LCARS · NOTEBOOK 47-Δ</span>
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#3a2400', letterSpacing: '.34em', marginTop: 3 }}>LCARS · NOTEBOOK ~{ship}</span>
           </div>
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 26 }}>
             {state.view === 'nb' && activeNb && (
@@ -346,17 +400,20 @@ export default function App() {
           {state.view === 'nb' ? (
             <>
               <div style={{ color: '#6b5a3c', fontSize: 10, letterSpacing: '.24em', padding: '2px 14px 0', textAlign: 'right' }}>KERNEL</div>
-              <div style={{ display: 'flex', gap: 7 }}>
-                <div
-                  className="lc-press"
-                  onClick={() => onSetKernel('north')}
-                  style={{ flex: 1, height: 52, borderRadius: '0 0 0 26px', background: activeNb?.kernel === 'north' ? '#ff9900' : '#3a2a10', color: activeNb?.kernel === 'north' ? '#000' : '#7a6334', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 16, letterSpacing: '.1em' }}
-                >NORTH</div>
-                <div
-                  className="lc-press"
-                  onClick={() => onSetKernel('hoon')}
-                  style={{ flex: 1, height: 52, borderRadius: '0 26px 0 0', background: activeNb?.kernel === 'hoon' ? '#cc88ff' : '#2a1c34', color: activeNb?.kernel === 'hoon' ? '#000' : '#6a548a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 16, letterSpacing: '.1em' }}
-                >HOON</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+                {kernelList.map(k => {
+                  const active = activeNb?.kernel === k
+                  const c = kernelColor(k)
+                  return (
+                    <div
+                      key={k}
+                      className="lc-press"
+                      onClick={() => onSetKernel(k)}
+                      title={k === 'hoon' ? 'in-process Hoon evaluator' : `shoe agent %${k}`}
+                      style={{ flex: '1 1 45%', minWidth: 0, height: 50, borderRadius: 25, background: active ? c : '#181209', color: active ? '#000' : c, border: `1px solid ${active ? c : c + '44'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 15, letterSpacing: '.08em', textTransform: 'uppercase', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', padding: '0 8px' }}
+                    >{k}</div>
+                  )
+                })}
               </div>
               {activeNb?.kernel === 'hoon' && (
                 <div className="lc-press" onClick={onRunAll} style={{ height: 54, borderRadius: '0 30px 30px 0', background: '#cc88ff', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 17, letterSpacing: '.06em' }}>RUN ALL ▶</div>
@@ -403,6 +460,28 @@ export default function App() {
                 {state.channelOpen ? 'SUBSCRIBED' : 'OFFLINE'}
               </div>
             </div>
+            {state.soleSessions && (
+              <div>
+                <div style={{ color: '#6b5a3c', fontSize: 10, letterSpacing: '.2em' }}>
+                  SESSIONS · {state.soleSessions.length}
+                </div>
+                {state.soleSessions.length === 0 ? (
+                  <div style={{ color: '#5a4a2c', fontSize: 13, marginTop: 2 }}>none active</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 1, marginTop: 3, maxHeight: 92, overflowY: 'auto' }}>
+                    {state.soleSessions.map(s => (
+                      <div
+                        key={`${s.ship}/${s.session}`}
+                        title={`~${s.ship}/${s.session}`}
+                        style={{ color: '#99e6a3', fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                      >
+                        ▸ ~{s.ship}/{s.session}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
