@@ -645,6 +645,13 @@
       ::  Each /notebook/<id>/txt holds one line of {state:{id,nb}} JSON; a
       ::  file that is missing, unreadable, or malformed is skipped via mule.
       ::  Imported notebooks override in-memory ones with the same id.
+      ::
+      ::  No-op if the log desk was never created (MOUNT makes it): scrying a
+      ::  nonexistent desk would bail, so gate on the desk list like %mount-log.
+      =/  all-desks  .^((set desk) %cd (en-beam [[our.bowl %$ [%da now.bowl]] /]))
+      ?.  (~(has in all-desks) %caderno-log)
+        :_  this
+        ~[(broadcast [%nb-list (nb-list-items nbs)])]
       =/  =arch
         .^(arch %cy (en-beam [[our.bowl %caderno-log [%da now.bowl]] /notebook]))
       =/  imported=(map @t notebook)
