@@ -244,12 +244,18 @@ function CellRow({ cell, isRunning, onRun, onDelete, onInsert, onUpdateSrc, onTo
 // ── markdown renderer ──────────────────────────────────────────────────────────
 
 function renderMd(src: string, accent: string): string {
-  const esc = (x: string) => x.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  // Escape all five HTML-significant chars — including quotes, so a link href
+  // can't break out of its attribute. Notebook source is attacker-controlled
+  // (followed/forked from other ships), rendered via dangerouslySetInnerHTML.
+  const esc = (x: string) => x.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+  // Only allow safe link schemes; block javascript:/data:/vbscript: etc.
+  const safeHref = (h: string) => /^(?:https?:\/\/|mailto:|\/|#)/i.test(h.trim()) ? h : '#'
   const inl = (x: string) => esc(x)
     .replace(/\*\*([^*]+)\*\*/g, `<b style="color:${accent};font-weight:700">$1</b>`)
     .replace(/`([^`]+)`/g, `<code style="font-family:'JetBrains Mono',monospace;background:#1d1712;color:${accent};padding:1px 6px;border-radius:4px;font-size:.84em">$1</code>`)
     .replace(/\*([^*]+)\*/g, '<i style="color:#e9c9a0">$1</i>')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, `<a href="$2" style="color:${accent};text-decoration:underline" target="_blank" rel="noopener">$1</a>`)
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m: string, txt: string, href: string) =>
+      `<a href="${safeHref(href)}" style="color:${accent};text-decoration:underline" target="_blank" rel="noopener noreferrer">${txt}</a>`)
 
   const lines = src.split('\n')
   let html = ''
