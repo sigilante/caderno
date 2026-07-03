@@ -184,4 +184,5 @@ export const actions = {
   deleteNotebook: (id: string) => poke({ 'delete-notebook': { id } }),
   mountLog: () => poke({ 'mount-log': null }),
   commitLog: () => poke({ 'commit-log': null }),
+  importLog: () => poke({ 'import-log': null }),
 }

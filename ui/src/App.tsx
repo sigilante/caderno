@@ -443,6 +443,12 @@ export default function App() {
                   style={{ height: 50, borderRadius: '0 30px 30px 0', background: '#3a2a10', color: '#9a8147', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 15, letterSpacing: '.03em' }}
                 >MOUNT</div>
               )}
+              <div
+                className="lc-press"
+                onClick={() => actions.importLog()}
+                title="Load notebooks from the committed %caderno-log desk into state"
+                style={{ height: 50, borderRadius: '0 30px 30px 0', background: '#2a2438', color: '#b79ae0', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 15, letterSpacing: '.03em' }}
+              >◂ IMPORT</div>
             </>
           )}
 
