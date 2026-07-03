@@ -685,9 +685,17 @@
       =/  new-cell  u.c(type type.act, outputs ~, exec-count ~)
       `this(nbs (~(put by nbs) active nb(cells (replace-cell id.act new-cell cells.nb))))
         %set-title
-      =/  new-nb  nb(title title.act)
-      :_  this(nbs (~(put by nbs) active new-nb))
-      ~[(broadcast [%nb-list (nb-list-items (~(put by nbs) active new-nb))])]
+      =/  new-nb   nb(title title.act)
+      =/  new-nbs  (~(put by nbs) active new-nb)
+      ::  followers get the new title via the published re-push below; lookers
+      ::  need an explicit catalog refresh (titles show in the catalog).
+      :_  this(nbs new-nbs)
+      %+  weld
+        ^-  (list card)
+        ~[(broadcast [%nb-list (nb-list-items new-nbs)])]
+      ^-  (list card)
+      ?.  (~(has in published) active)  ~
+      ~[(catalog-fact published new-nbs)]
         %new-notebook
       =/  new-id  (crip (weld "nb-" (trip (scot %ud counter))))
       =/  new-nb  ^-  notebook
@@ -816,8 +824,11 @@
       ==
     ::
         %lookup
+      ::  leave any prior sub on this wire first, so re-looking-up the same ship
+      ::  gets a fresh catalog instead of a duplicate-wire nack.
       :_  this
-      :~  :*  %pass  /lookup/(scot %p who.act)
+      :~  [%pass /lookup/(scot %p who.act) %agent [who.act %caderno] %leave ~]
+          :*  %pass  /lookup/(scot %p who.act)
               %agent  [who.act %caderno]  %watch  /published-list
       ==  ==
     ::
@@ -955,8 +966,11 @@
     ?+  -.sign  `this
         %watch-ack
       ?~  p.sign  `this
+      ::  surface the failure to the UI as an empty catalog (so the lookup view
+      ::  shows "unreachable" instead of hanging), and slog for the operator.
       %-  (slog leaf+"caderno: lookup ~{(scow %p who)} failed" u.p.sign)
-      `this
+      :_  this
+      ~[(broadcast [%lookup who ~])]
         %kick  `this
         %fact
       ?.  =(%json p.cage.sign)  `this
@@ -1010,6 +1024,10 @@
       =/  new-nb=notebook  (need (~(get by nbs) active))
       |-
       ?~  effects
+        ::  shoe output lands here (async), not in on-poke, so the on-poke
+        ::  follower re-push misses it — push explicitly if active is published.
+        =?  cd  (~(has in published) active)
+          (snoc cd (pub-fact active new-nb))
         :_  this(ksession `new-ks, nbs (~(put by nbs) active new-nb))
         cd
       =/  efx  i.effects
