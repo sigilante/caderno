@@ -40,6 +40,12 @@
       [%mount-log ~]
       [%commit-log ~]
       [%import-log ~]
+    ::  publishing / following over Gall subscription
+      [%publish id=@t]                                  ::  expose a local nb
+      [%unpublish id=@t]                                ::  stop exposing it
+      [%follow who=@p id=@t]                            ::  subscribe to a remote nb
+      [%unfollow who=@p id=@t]                          ::  drop a subscription
+      [%fork who=@p id=@t]                              ::  copy a follow into local nbs
   ==
 
 +$  update
@@ -51,6 +57,9 @@
       [%cell-deleted id=cell-id]
       [%log-mounted ~]
       [%log-committed ~]
+    ::  which local nbs are public, and the remote nbs we follow
+      [%published ids=(set @t)]
+      [%follows items=(list [who=@p id=@t title=@t])]
   ==
 
 ::  sole session state for shoe kernel delegation

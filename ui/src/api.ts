@@ -45,6 +45,8 @@ export type Update =
   | { 'cell-deleted': { id: number } }
   | { 'log-mounted': boolean }
   | { 'log-committed': boolean }
+  | { 'published': string[] }
+  | { 'follows': { who: string; id: string; title: string }[] }
 
 let channelId = `caderno-${Date.now()}`
 let eventSource: EventSource | null = null
@@ -185,4 +187,10 @@ export const actions = {
   mountLog: () => poke({ 'mount-log': null }),
   commitLog: () => poke({ 'commit-log': null }),
   importLog: () => poke({ 'import-log': null }),
+  publish: (id: string) => poke({ 'publish': { id } }),
+  unpublish: (id: string) => poke({ 'unpublish': { id } }),
+  // `who` is a patp with the leading ~ (e.g. "~nec"); backend parses via slav %p.
+  follow: (who: string, id: string) => poke({ 'follow': { who, id } }),
+  unfollow: (who: string, id: string) => poke({ 'unfollow': { who, id } }),
+  fork: (who: string, id: string) => poke({ 'fork': { who, id } }),
 }

@@ -19,7 +19,11 @@ type AppState = {
   kelvins: Kelvins | null
   soleSessions: SoleSession[] | null  // active sole sessions on the current shoe kernel, null if kernel is in-process (hoon)
   kernels: string[]  // available kernels: in-process 'hoon' + discovered shoe agents
+  published: string[]  // local notebook ids exposed to followers
+  follows: FollowEntry[]  // read-only remote notebooks we subscribe to
 }
+
+export type FollowEntry = { who: string; id: string; title: string }
 
 export type NbEntry = {
   id: string
@@ -96,6 +100,8 @@ type Action =
   | { type: 'set-log-mounted'; mounted: boolean }
   | { type: 'set-sole-sessions'; sessions: SoleSession[] | null }
   | { type: 'set-kernels'; kernels: string[] }
+  | { type: 'set-published'; published: string[] }
+  | { type: 'set-follows'; follows: FollowEntry[] }
 
 function reducer(state: AppState, action: Action): AppState {
   const activeNb = () => state.notebooks.find(n => n.id === state.active) ?? null
@@ -204,6 +210,10 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, soleSessions: action.sessions }
     case 'set-kernels':
       return { ...state, kernels: action.kernels }
+    case 'set-published':
+      return { ...state, published: action.published }
+    case 'set-follows':
+      return { ...state, follows: action.follows }
     default: return state
   }
 }
@@ -232,7 +242,7 @@ const kernelColor = (k: string) => KERNEL_COLORS[k] ?? '#6c8cff'
 
 export default function App() {
   const [state, dispatch] = useReducer(reducer, {
-    view: 'list', active: null, notebooks: [], channelOpen: false, logMounted: false, error: null, running: new Set<number>(), kelvins: null, soleSessions: null, kernels: ['hoon'],
+    view: 'list', active: null, notebooks: [], channelOpen: false, logMounted: false, error: null, running: new Set<number>(), kelvins: null, soleSessions: null, kernels: ['hoon'], published: [], follows: [],
   })
   const stateRef = useRef(state)
   stateRef.current = state
@@ -246,6 +256,8 @@ export default function App() {
     else if ('cell-deleted' in upd)  dispatch({ type: 'cell-deleted', id: upd['cell-deleted'].id })
     else if ('log-mounted' in upd)   dispatch({ type: 'log-mounted' })
     else if ('log-committed' in upd) dispatch({ type: 'log-committed' })
+    else if ('published' in upd)     dispatch({ type: 'set-published', published: upd['published'] })
+    else if ('follows' in upd)       dispatch({ type: 'set-follows', follows: upd['follows'] })
   }, [])
 
   useEffect(() => {
@@ -319,6 +331,22 @@ export default function App() {
   const onOpen = (id: string) => {
     dispatch({ type: 'set-view', view: 'nb', id })
     actions.switchNotebook(id)
+  }
+  const onTogglePublish = (id: string) => {
+    if (state.published.includes(id)) actions.unpublish(id)
+    else actions.publish(id)
+  }
+  const onFollow = () => {
+    const who = window.prompt('Publisher ship (e.g. ~sampel-palnet):')?.trim()
+    if (!who) return
+    const id = window.prompt('Notebook id to follow:')?.trim()
+    if (!id) return
+    actions.follow(who.startsWith('~') ? who : `~${who}`, id)
+  }
+  const onUnfollow = (who: string, id: string) => { actions.unfollow(who, id) }
+  const onFork = (who: string, id: string) => {
+    actions.fork(who, id)
+    dispatch({ type: 'set-view', view: 'nb' })
   }
 
   const srcDebounce = useRef(new Map<number, ReturnType<typeof setTimeout>>())
@@ -424,6 +452,17 @@ export default function App() {
               <div className="lc-press" onClick={onAddText} style={{ height: 50, borderRadius: '0 30px 30px 0', background: '#ff8866', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 16, letterSpacing: '.04em' }}>+ TEXT</div>
               <div className="lc-press" onClick={onBack} style={{ height: 50, borderRadius: '0 30px 30px 0', background: '#d9a441', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 16, letterSpacing: '.04em' }}>◂ INDEX</div>
               <div className="lc-press" onClick={onResetSubject} style={{ height: 50, borderRadius: '0 30px 30px 0', background: '#3a2a10', color: '#9a8147', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 14, letterSpacing: '.04em' }}>RESET ENV</div>
+              {activeNb && (() => {
+                const pub = state.published.includes(activeNb.id)
+                return (
+                  <div
+                    className="lc-press"
+                    onClick={() => onTogglePublish(activeNb.id)}
+                    title={pub ? 'Public — others can follow this notebook' : 'Publish so others can follow this notebook'}
+                    style={{ height: 50, borderRadius: '0 30px 30px 0', background: pub ? '#3a4a3a' : '#3a2a10', color: pub ? '#99e6a3' : '#9a8147', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 14, letterSpacing: '.04em' }}
+                  >{pub ? '◉ PUBLISHED' : '○ PUBLISH'}</div>
+                )
+              })()}
             </>
           ) : (
             <>
@@ -449,6 +488,12 @@ export default function App() {
                 title="Load notebooks from the committed %caderno-log desk into state"
                 style={{ height: 50, borderRadius: '0 30px 30px 0', background: '#2a2438', color: '#b79ae0', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 15, letterSpacing: '.03em' }}
               >◂ IMPORT</div>
+              <div
+                className="lc-press"
+                onClick={onFollow}
+                title="Subscribe to a published notebook on another ship"
+                style={{ height: 50, borderRadius: '0 30px 30px 0', background: '#1c3040', color: '#7fd4ff', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 15, letterSpacing: '.03em' }}
+              >+ FOLLOW</div>
             </>
           )}
 
@@ -510,8 +555,11 @@ export default function App() {
         ) : (
           <NotebookIndex
             notebooks={state.notebooks}
+            follows={state.follows}
             error={state.error}
             onOpen={onOpen}
+            onFork={onFork}
+            onUnfollow={onUnfollow}
           />
         )}
 
