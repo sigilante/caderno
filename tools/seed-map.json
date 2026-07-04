@@ -1,0 +1,9 @@
+{
+  "_comment": "Default caderno seeds: the first four Hoon School lessons from docs.urbit.org. Regenerate with: node tools/import-docs.mjs ~/urbit/docs.urbit.org/content/build-on-urbit/hoon-school --map tools/seed-map.json",
+  "notebooks": [
+    { "src": "B-syntax.md",  "id": "hs-syntax",  "title": "Hoon School: 1. Syntax" },
+    { "src": "C-azimuth.md", "id": "hs-azimuth", "title": "Hoon School: 2. Azimuth" },
+    { "src": "D-gates.md",   "id": "hs-gates",   "title": "Hoon School: 3. Gates" },
+    { "src": "E-types.md",   "id": "hs-types",   "title": "Hoon School: 4. Molds" }
+  ]
+}
