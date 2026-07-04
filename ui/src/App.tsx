@@ -339,6 +339,7 @@ export default function App() {
     dispatch({ type: 'set-view', view: 'nb', id })
     actions.switchNotebook(id)
   }
+  const onDeleteNb = (id: string) => { actions.deleteNotebook(id) }
   const onTogglePublish = (id: string) => {
     if (state.published.includes(id)) actions.unpublish(id)
     else actions.publish(id)
@@ -583,6 +584,7 @@ export default function App() {
             follows={state.follows}
             error={state.error}
             onOpen={onOpen}
+            onDelete={onDeleteNb}
             onFork={onFork}
             onUnfollow={onUnfollow}
           />
