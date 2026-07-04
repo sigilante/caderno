@@ -64,7 +64,11 @@ export function mdToNotebook(md, opts = {}) {
       const src = code.join('\n')
       if (runnable.includes(lang)) {
         flushProse()
-        cells.push({ id: id++, type: 'code', source: src, outputs: [], exec_count: null })
+        // A dojo-transcript block (has `>` prompts) is split into one runnable
+        // code cell per prompted input, with output dropped. A plain block
+        // (a whole expression/gate) becomes a single verbatim cell.
+        const parts = /^\s*>/m.test(src) ? transcriptInputs(src) : [src]
+        for (const source of parts) cells.push({ id: id++, type: 'code', source, outputs: [], exec_count: null })
       } else {
         // non-runnable fence (bash, output, etc.): keep it as a fenced block in prose
         prose.push('```' + open[1], src, '```')
@@ -76,4 +80,21 @@ export function mdToNotebook(md, opts = {}) {
   flushProse()
 
   return { nbformat: NBFORMAT, title, kernel, cells }
+}
+
+// Split a dojo transcript into per-input sources: a `>`-prompted line (prompt
+// stripped) plus its indented continuation lines; non-indented, non-prompt lines
+// are output and dropped. Multi-line inputs de-align by the 2-col prompt width.
+function transcriptInputs(body) {
+  const inputs = []
+  let cur = null
+  const flush = () => { if (cur) { const s = cur.join('\n').replace(/\s+$/, ''); if (s.trim()) inputs.push(s); cur = null } }
+  for (const ln of body.split('\n')) {
+    const p = ln.match(/^\s*>+ ?(.*)$/)
+    if (p) { flush(); cur = [p[1]] }
+    else if (cur && /^\s+\S/.test(ln)) cur.push(ln.replace(/^ {1,2}/, ''))
+    else flush()
+  }
+  flush()
+  return inputs
 }
