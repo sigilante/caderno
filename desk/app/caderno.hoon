@@ -624,8 +624,21 @@
           (broadcast [%log-mounted ~])
       ==
         %commit-log
-      ::  write all notebooks as JSON text to %caderno-log and commit
-      =/  soba  (nbs-to-soba nbs)
+      ::  Mirror state to %caderno-log: write every current notebook, and delete
+      ::  the files of notebooks removed from state since the last commit — so a
+      ::  later %import-log doesn't resurrect them. Guarded on the log desk.
+      =/  ins-soba  (nbs-to-soba nbs)
+      =/  all-desks  .^((set desk) %cd (en-beam [[our.bowl %$ [%da now.bowl]] /]))
+      =/  del-soba=(list [path miso:clay])
+        ?.  (~(has in all-desks) %caderno-log)  ~
+        =/  a  (mule |.(.^(arch %cy (en-beam [[our.bowl %caderno-log [%da now.bowl]] /notebook]))))
+        ?:  ?=(%| -.a)  ~
+        %+  murn  ~(tap in ~(key by dir.p.a))
+        |=  id=@ta
+        ^-  (unit [path miso:clay])
+        ?:  (~(has by nbs) `@t`id)  ~
+        `[(welp /notebook `path`[id /txt]) [%del ~]]
+      =/  soba  (weld ins-soba del-soba)
       :_  this
       :~  [%pass /caderno/clay %arvo %c [%info %caderno-log [%& soba]]]
           [%pass /caderno/hood/commit %agent [our.bowl %hood] %poke %kiln-commit !>([%caderno-log %.n])]
