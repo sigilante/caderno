@@ -7,11 +7,12 @@ interface Props {
   follows: FollowEntry[]
   error: string | null
   onOpen: (id: string) => void
+  onDelete: (id: string) => void
   onFork: (who: string, id: string) => void
   onUnfollow: (who: string, id: string) => void
 }
 
-export function NotebookIndex({ notebooks, follows, error, onOpen, onFork, onUnfollow }: Props) {
+export function NotebookIndex({ notebooks, follows, error, onOpen, onDelete, onFork, onUnfollow }: Props) {
   // The backend lists notebooks in map-hash order; present them alphabetically
   // by title so the index is stable and scannable.
   const sorted = [...notebooks].sort((a, b) =>
@@ -81,7 +82,20 @@ export function NotebookIndex({ notebooks, follows, error, onOpen, onFork, onUnf
                   SD {nb.stardate} &nbsp;·&nbsp; {(nb.status || 'saved').toUpperCase()}
                 </div>
               </div>
-              <span style={{ marginLeft: 'auto', color: '#cc88ff', fontSize: 26 }}>▶</span>
+              <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 16 }}>
+                {notebooks.length > 1 && (
+                  <span
+                    className="lc-press"
+                    title="Delete this notebook"
+                    onClick={e => {
+                      e.stopPropagation()
+                      if (window.confirm(`Delete "${nb.name}"? This cannot be undone.`)) onDelete(nb.id)
+                    }}
+                    style={{ color: '#7a3a3a', fontSize: 18, fontWeight: 700, lineHeight: 1 }}
+                  >✕</span>
+                )}
+                <span style={{ color: '#cc88ff', fontSize: 26 }}>▶</span>
+              </div>
             </div>
           </div>
         ))}

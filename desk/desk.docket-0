@@ -2,7 +2,7 @@
   title+'Caderno'
   info+'Hoon notebook for Urbit.'
   color+0xff.9900
-  version+[0 3 0]
+  version+[0 3 1]
   website+'https://github.com/sigilante/caderno'
   license+'MIT'
   image+'/apps/caderno/img/icon-256.png'
