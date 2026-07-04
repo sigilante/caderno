@@ -1,0 +1,15 @@
+{
+  "_comment": [
+    "Optional overrides for tools/import-docs.mjs. Copy to seed-map.json and edit.",
+    "Point import-docs.mjs at your local docs.urbit.org checkout; `src` is relative",
+    "to the <md-dir-or-file> argument. Omit this file to auto-import every *.md in a",
+    "directory (id = filename slug, title from frontmatter/first heading).",
+    "Set include:false to skip an entry; order here is the notebook order."
+  ],
+  "notebooks": [
+    { "src": "hoon-school/lesson-1.md", "id": "hs-syntax",  "title": "Hoon School: 1. Syntax" },
+    { "src": "hoon-school/lesson-2.md", "id": "hs-azimuth", "title": "Hoon School: 2. Azimuth" },
+    { "src": "hoon-school/lesson-3.md", "id": "hs-gates",   "title": "Hoon School: 3. Gates" },
+    { "src": "hoon-school/lesson-4.md", "id": "hs-types",   "title": "Hoon School: 4. Molds" }
+  ]
+}
