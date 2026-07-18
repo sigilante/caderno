@@ -4,27 +4,6 @@
 /-  *caderno, *sole
 /+  default-agent, dbug
 ::
-::  +base-subject: captured *here* -- right after the imports, before any
-::  of caderno's own code -- so `.` is exactly the standard library (zuse,
-::  which itself already subsumes lull and every chapter of hoon.hoon) plus
-::  the imported faces (caderno/sole's sur types, default-agent, dbug), and
-::  nothing else: no agent state, no bowl, and none of caderno's own ~30
-::  helper arms below.
-::
-::  This replaces two prior, both-wrong attempts at the same thing:
-::  - `!>(..add)` under-provisions the subject: hoon.hoon is a chain of
-::    chapter cores composed with `=>`, and `++add` lives in an early
-::    chapter (%one) while `++sort`/`++turn`/`++weld` live in a later one
-::    (%two, built on top of %one) -- `..add` climbs only to %one, whose
-::    context can't see %two, so a cell running `(sort ~[3 1 2] lth)`
-::    fails with `-find.sort`.
-::  - `!>(.)`, evaluated *inside* `++fresh-subject` (an arm of caderno's
-::    own outer |% core), over-corrects: `.` there is the whole enclosing
-::    core -- every one of caderno's own helper arms, not just the
-::    standard library -- which is unnecessarily large and was implicated
-::    in a live ship crash under repeated re-evaluation.
-::
-=/  base-subject=vase  !>(.)
 |%
 ::  nbs maps stable @t id to notebook; active is the focused notebook id.
 +$  state-4
@@ -80,7 +59,7 @@
 
 ++  fresh-subject
   ^-  vase
-  base-subject
+  !>(..zuse)
 
 ::  Evaluate a Hoon cord against a subject vase.
 ::  Returns the output to show and the new accumulated subject.
