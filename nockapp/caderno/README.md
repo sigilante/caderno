@@ -10,11 +10,51 @@ and persist across restarts.
 
 ## Building
 
+Requires `hoonc` and `nockup` (both from the nockup toolchain), Node, and
+the Rust nightly pinned in `rust-toolchain.toml`. From this directory:
+
+```bash
+make deps     # once: fetches urbit/zuse + urbit/lull into hoon/packages
+make run      # builds everything as needed, serves on 127.0.0.1:8080
+```
+
+`make help` lists the rest. The ones you will want:
+
+| target | |
+|---|---|
+| `make build` | build everything, skipping what is current (default) |
+| `make run` | build, then serve with `WEB_DIR` and the cell timeout set |
+| `make reset` | discard all notebooks — state lives in the checkpoint, not files |
+| `make clean` | remove build outputs, keeping notebook state |
+
+`make run` accepts `CELL_TIMEOUT` (seconds a cell may run before the
+watchdog restarts the process; default 15). There is deliberately no
+`PORT`: at the nockchain rev pinned in `Cargo.toml` the http driver
+hardcodes `127.0.0.1:8080` and reads no `HTTP_PORT`. Later revisions of
+that driver do honour one, so check before adding it. To serve elsewhere,
+put a reverse proxy in front.
+
+### Why there is a Makefile
+
 The UI build and the kernel build are **coupled**. Vite content-hashes
 the bundle filenames, and `index.html` — which names them — is baked into
-the kernel by `/*  index  %html  /app/site/index/html`. So any UI change
-means re-copying `index.html` and re-running `hoonc`, or `GET /` will
-serve a page pointing at bundles that no longer exist:
+the kernel by `/*  index  %html  /app/site/index/html`. Change the UI
+without re-copying `index.html` and re-running `hoonc`, and `GET /` will
+serve a page pointing at bundles that no longer exist. The Makefile
+encodes that chain so it cannot be skipped:
+
+```
+ui/src/**  ->  ui/dist/index.html  ->  hoon/app/site/index.html  ->  out.jam
+                                                        src/*.rs  ->  target/release/caderno
+```
+
+Only `index.html` is baked in. The hashed JS/CSS come from `WEB_DIR`,
+which the runtime serves at a hardcoded `/static` prefix — hence
+`base: '/static/'` in `vite.config.ts`. Never serve bundles from Hoon:
+the driver's response path panics on any body containing a `0x00` byte.
+
+`ui/dist` is gitignored, so a fresh checkout has nothing for `WEB_DIR` to
+point at until the UI is built. `make` handles that; by hand it is:
 
 ```bash
 cd ../../ui && npm run build && cd -
@@ -24,28 +64,18 @@ cargo build --release
 WEB_DIR=$PWD/../../ui/dist ./target/release/caderno
 ```
 
-Only `index.html` is baked in; the hashed JS/CSS come from `WEB_DIR`,
-which the runtime serves at a hardcoded `/static` prefix (hence
-`base: '/static/'` in `vite.config.ts`). `ui/dist` is gitignored, so a
-fresh checkout must build the UI before `WEB_DIR` points at anything.
-
-For UI development, `npm run dev` proxies `/api/*` to `127.0.0.1:8080`,
-so the binary can keep running while vite serves the app with HMR.
-
-Requires `hoonc` and `nockup`, plus the nightly pinned in
-`rust-toolchain.toml`.
-
-```bash
-nockup package install          # from the parent dir; fetches urbit/zuse + lull
-hoonc hoon/app/app.hoon hoon    # -> out.jam
-cargo build --release
-./target/release/caderno        # listens on 127.0.0.1:8080
-```
-
 The kernel is read from `out.jam` in the working directory at *runtime*,
-so re-run `hoonc` after any Hoon change. `hoonc` prints a success banner
-even when the compile failed — the real signal is that `out.jam` was
-rewritten.
+so `hoonc` must be re-run after any Hoon change. It prints a success
+banner even when the compile failed — the real signal is that `out.jam`
+was rewritten, which is why the Makefile deletes it first and fails if it
+does not reappear.
+
+### UI development
+
+`npm run dev` in `../../ui` serves the app with HMR and proxies `/api/*`
+to `127.0.0.1:8080`, so the binary can keep running while you iterate.
+Nothing needs rebuilding in this directory during that loop — the
+coupling above only matters for the bundled build that `make` produces.
 
 ## API
 
