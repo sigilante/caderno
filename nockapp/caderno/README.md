@@ -76,29 +76,59 @@ under it. `!>(.)` captures the whole stdlib. The Urbit desk uses the
 compile standalone, so `hoon/lib/json.hoon` vendors `+$json` from
 `lull.hoon` and `++json:html` from `zuse.hoon` @k409.
 
-## Caveats
+## Bounding runaway cells
 
-**A runaway cell kills the process — but it recovers.** A cell that
-allocates without bound exhausts the NockStack, which nockvm reports as a
-Rust `panic_any` (`nockvm/src/mem.rs`) rather than a %meme bail, killing
-the `serf` thread. Left alone the process stays up and NACKs every poke
-forever, bricked but still answering on its port.
+**Nock computation here cannot be interrupted.** nockvm reads its cancel
+token in exactly two places — entry to and exit from `interpret()`
+(`interpreter.rs:451,1028`) — and never in the opcode work loop, so
+`BAIL_INTR` is dead code and `poke_timeout` returns a timeout to the
+caller while the serf thread keeps running. There is no `%jinx` hint in
+this runtime, and `%bout` only times and logs. A cell cannot be stopped;
+the process can only be killed and restarted.
 
-`main.rs` installs a panic hook that aborts instead, and sets
-`save_interval` to 1s, so the failure mode is now: process dies, a
-supervisor restarts it, state comes back from the last checkpoint about a
-second old, and the offending cell's source is preserved so it can be
-edited. Verified end to end, including that the killer poke is not
-replayed into a crash loop.
+So that is what happens, deliberately, by two mechanisms:
 
-Both shapes of runaway hit this — one that grows an atom, and a
-tail-recursive loop that does not — so in practice runaway cells fail
-loudly and recoverably rather than silently and permanently. What this
-does *not* do is prevent the denial of service: anyone who can run a cell
-can restart the process at will. That needs either a fuel-limited
-evaluator in Hoon (vendoring `+mink` without its jet hint and threading a
-step counter, at a large interpretation cost) or a nockvm patch making
-the interpreter poll its cancel token. Neither is done.
+- **`abort_on_panic`** — a cell that allocates without bound exhausts the
+  NockStack, which nockvm reports as a Rust `panic_any`
+  (`nockvm/src/mem.rs`) rather than a %meme bail, killing the `serf`
+  thread. Left alone the process stays up and NACKs every poke forever,
+  bricked but still answering on its port. The panic hook aborts instead.
+- **`watchdog_driver`** — pokes and peeks are serialized through the one
+  serf thread, so a trivial peek cannot complete while a cell is running.
+  The watchdog probes once a second; no answer for `CADERNO_CELL_TIMEOUT`
+  seconds (default 15) means a cell has been running that long, and it
+  aborts. This is the *time* bound: a cell that spins without exhausting
+  memory would otherwise run forever.
+
+With `save_interval` at 1s, a crash costs a restart and up to a second of
+edits. Verified end to end: with a 5s limit the watchdog fires at ~5s,
+ahead of stack exhaustion; the process restarts clean with no crash loop
+from replay, state returns from the checkpoint, and evaluation works
+afterwards.
+
+Caveats on the caveats:
+
+- **The edit that caused the crash may or may not survive.** It depends
+  on whether a checkpoint landed between the edit and the run. Both
+  outcomes observed.
+- **A legitimately slow cell is killed too.** Raise
+  `CADERNO_CELL_TIMEOUT` if that bites.
+- **The denial of service remains.** Anyone who can run a cell can
+  restart the process at will; failure is now loud, bounded and
+  recoverable rather than silent and permanent, which is the difference
+  between unusable and fine-for-a-trusted-user — not between unsafe and
+  safe.
+- **The first `WATCHDOG_GRACE` seconds after boot are unprobed**, so the
+  kernel is not held to the limit while it is still starting up.
+
+Bounding *work* rather than wall clock would mean a fuel-limited
+evaluator: vendoring `+mink` without its `~%` hint and threading a step
+counter, so `eval-hoon` runs the compiled formula under it instead of
+`slap`'s `.*`. Entirely doable on our side, but dropping the jet means
+user code becomes interpreted Nock-in-Nock — `add` would run the Hoon
+decrement loop — so it wants to be a mode, not the default. Not done.
+
+## Other caveats
 
 **Serve JS/CSS bundles from `WEB_DIR`, not from Hoon.** The driver's
 response path uses `to_bytes_until_nul` and then `copy_from_slice`, so

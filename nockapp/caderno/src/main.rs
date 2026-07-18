@@ -1,9 +1,66 @@
 use std::env;
 use std::error::Error;
 use std::fs;
+use std::time::Duration;
 
+use nockapp::driver::{make_driver, IODriverFn};
 use nockapp::kernel::boot;
+use nockapp::noun::slab::NounSlab;
 use nockapp::{http_driver, NockApp};
+use nockvm::noun::{D, T};
+use nockvm_macros::tas;
+
+/// Seconds a single cell may run before the watchdog kills the process.
+const DEFAULT_CELL_TIMEOUT: u64 = 15;
+
+/// Seconds to let the kernel boot before the watchdog starts probing.
+const WATCHDOG_GRACE: u64 = 20;
+
+/// Abort the process if the kernel stops responding for too long.
+///
+/// Nock computation here cannot be interrupted. nockvm reads its cancel
+/// token in exactly two places -- entry to and exit from `interpret()`
+/// (`interpreter.rs:451,1028`) -- and never in the opcode work loop, so
+/// `BAIL_INTR` is dead code and `poke_timeout` only ever returns a timeout
+/// to the *caller* while the serf thread keeps running. There is no %jinx
+/// hint in this runtime, and %bout merely times and logs. So a cell cannot
+/// be stopped; the process can only be killed and restarted.
+///
+/// This is that, done deliberately. Pokes and peeks are serialized through
+/// the single serf thread, so a trivial peek cannot complete while a cell
+/// is still evaluating. Probing once a second and finding no answer for
+/// `timeout` means a cell has been running that long, and we abort. With
+/// `save_interval` at 1s and a supervisor, the cost is a restart and about
+/// a second of edits.
+///
+/// This bounds *time*, which is what the stack-exhaustion abort does not:
+/// a cell that spins without allocating would otherwise run forever.
+/// A legitimately slow cell is also killed -- raise CADERNO_CELL_TIMEOUT
+/// if that is a problem, and see the README for the alternative (a
+/// fuel-limited evaluator) that bounds work instead of wall clock.
+fn watchdog_driver(timeout: Duration) -> IODriverFn {
+    make_driver(move |handle| async move {
+        tokio::time::sleep(Duration::from_secs(WATCHDOG_GRACE)).await;
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        loop {
+            interval.tick().await;
+
+            let mut slab = NounSlab::new();
+            let path = T(&mut slab, &[D(tas!(b"watchdog")), D(0)]);
+            slab.set_root(path);
+
+            if tokio::time::timeout(timeout, handle.peek(slab)).await.is_err() {
+                eprintln!(
+                    "caderno: kernel unresponsive for {}s -- a cell is most likely \
+                     in a runaway loop, and nockvm cannot interrupt it. Aborting so \
+                     the process can be restarted from its checkpoint.",
+                    timeout.as_secs()
+                );
+                std::process::abort();
+            }
+        }
+    })
+}
 
 /// Make any panic fatal to the process.
 ///
@@ -67,7 +124,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .await
         .map_err(|e| format!("Kernel setup failed: {}", e))?;
 
+    let cell_timeout = env::var("CADERNO_CELL_TIMEOUT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_CELL_TIMEOUT);
+
     nockapp.add_io_driver(http_driver()).await;
+    nockapp
+        .add_io_driver(watchdog_driver(Duration::from_secs(cell_timeout)))
+        .await;
     nockapp.run().await.expect("Failed to run app");
 
     Ok(())
