@@ -6,7 +6,7 @@
 ## that step leaves the kernel serving a page that references bundles which
 ## no longer exist. This encodes the dependency so make handles it.
 
-UI_DIR      := ../../ui
+UI_DIR      := ../ui
 WEB_DIR     := $(abspath $(UI_DIR)/dist)
 SITE_INDEX  := hoon/app/site/index.html
 KERNEL      := out.jam
@@ -34,9 +34,15 @@ build: $(KERNEL) $(BIN)   ## build everything (default)
 deps:                     ## install hoon packages (urbit/zuse, urbit/lull)
 	cd .. && nockup package install
 
+## A fresh checkout has no node_modules, and npm run build then fails with
+## a bare exit 127. Install on demand, keyed on package.json.
+$(UI_DIR)/node_modules: $(UI_DIR)/package.json
+	cd $(UI_DIR) && npm install
+	@touch $@
+
 ## The React app. Vite must be configured with base: '/static/', since the
 ## NockApp http driver mounts WEB_DIR at a hardcoded /static.
-$(UI_DIR)/dist/index.html: $(UI_SRCS)
+$(UI_DIR)/dist/index.html: $(UI_SRCS) | $(UI_DIR)/node_modules
 	cd $(UI_DIR) && npm run build
 
 .PHONY: ui
