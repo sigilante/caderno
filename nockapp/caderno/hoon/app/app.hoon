@@ -7,6 +7,7 @@
 ::  (d) accumulate the subject across evaluations via +slop.
 ::
 /+  *http
+/+  *json
 /=  *  /common/wrapper
 =>
 |%
@@ -59,6 +60,15 @@
   ?:  ?=(%| -.evaled)
     [(cat 3 'EvalError: ' (tang-to-cord p.evaled)) subj]
   [(crip ~(ram re (sell p.evaled))) (slop p.evaled subj)]
+::
+++  json-probe
+  |=  src=@t
+  ^-  @t
+  ::  round-trip: parse the body as JSON, wrap it, re-encode
+  =/  parsed=(unit json)  (de-json src)
+  ?~  parsed  'de-json: parse failed'
+  %-  en-json
+  [%o (~(gas by *(map @t json)) ~[['ok' [%b &]] ['echo' u.parsed]])]
 ::
 ++  usage
   ^-  @t
@@ -119,6 +129,15 @@
       :_  ~
       ^-  effect
       [%res id %200 ['content-type' 'text/plain']~ (to-octs 'subject reset\0a')]
+    ::
+    ?:  =('/json' uri)
+      ?~  body  [~[[%res id %400 ~ ~]] state]
+      :_  state
+      :_  ~
+      ^-  effect
+      :*  %res  id  %200  ['content-type' 'application/json']~
+          (to-octs (cat 3 (json-probe (trim q.u.body)) '\0a'))
+      ==
     ::
     ?.  =('/eval' uri)
       [~[[%res id %404 ~ ~]] state]

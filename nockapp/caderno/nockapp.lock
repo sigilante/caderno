@@ -1,0 +1,29 @@
+[[package]]
+name = "urbit/zuse"
+version = "k409"
+
+[package.source]
+type = "git"
+url = "https://github.com/urbit/urbit"
+commit = "c767abc8f5010684c17dc7a48a93b75359d143e7"
+path = "pkg/arvo/sys"
+
+[[package]]
+name = "urbit/lull"
+version = "latest"
+
+[package.source]
+type = "git"
+url = "https://github.com/urbit/urbit"
+commit = "0a9a312e133891937de9c4df1ebecad5cf669c7c"
+path = "pkg/arvo/sys"
+
+[[package]]
+name = "urbit/hoon"
+version = "latest"
+
+[package.source]
+type = "git"
+url = "https://github.com/urbit/urbit"
+commit = "0a9a312e133891937de9c4df1ebecad5cf669c7c"
+path = "pkg/arvo/sys"
