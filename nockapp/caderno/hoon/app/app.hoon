@@ -4,12 +4,16 @@
 ::  evaluator are in /lib/caderno; this file is the kernel shell and the
 ::  HTTP surface.
 ::
-::  API, all POST -- the http driver's response cache is keyed on URI
-::  alone and consulted only for GET, so keeping the API on POST sidesteps
-::  it entirely:
-::
 ::    POST /api/state    -> full state snapshot
 ::    POST /api/action   -> apply one action, respond with the snapshot
+::
+::  Both answer 201, not 200, and that is load-bearing. The http driver
+::  caches responses in a single global slot -- not a map, no URI key --
+::  writing it on any effect whose status is exactly 200, and reading it
+::  on any GET. So a 200 from POST /api/state becomes the response to
+::  GET / until the cache expires. Answering 201 means the API never
+::  writes that slot, so the only thing ever cached is the page GET /
+::  itself returns, which is what a cache should hold anyway.
 ::
 /+  *http
 /+  *json
@@ -93,7 +97,7 @@
     ?:  =('/api/state' uri)
       =/  s  (ensure-init:cn +.state)
       :_  state(+ s)
-      ~[(json-response id 200 (store-to-json:cn s))]
+      ~[(json-response id 201 (store-to-json:cn s))]
     ::
     ?.  =('/api/action' uri)
       [~[(error-response id 404 'no such route')] state]
@@ -109,7 +113,7 @@
     ::
     =/  s  (apply:cn u.act +.state)
     :_  state(+ s)
-    ~[(json-response id 200 (store-to-json:cn s))]
+    ~[(json-response id 201 (store-to-json:cn s))]
   --
 --
 ((moat |) inner)

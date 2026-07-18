@@ -27,8 +27,12 @@ rewritten.
 
 ## API
 
-Everything is POST. The http driver's response cache is consulted only
-for GET, so keeping the API on POST sidesteps it (see Caveats).
+Everything is POST, and every API response is **201, not 200**. That is
+load-bearing: the driver caches responses in a single global slot (not a
+map -- there is no URI key), writing it on any effect whose status is
+exactly 200 and reading it on any GET. A 200 from `POST /api/state` would
+therefore become the response to `GET /`. Answering 201 keeps the API out
+of that slot entirely.
 
 ```bash
 curl -XPOST localhost:8080/api/state
@@ -74,30 +78,29 @@ compile standalone, so `hoon/lib/json.hoon` vendors `+$json` from
 
 ## Caveats
 
-**A runaway cell wedges the app permanently.** A cell that loops while
-allocating exhausts the NockStack, which is a Rust `panic_any` in
-`nockvm/src/mem.rs` rather than a `%meme` bail. The `serf` thread dies,
-the process stays up, and every subsequent poke NACKs forever:
+**A runaway cell kills the process — but it recovers.** A cell that
+allocates without bound exhausts the NockStack, which nockvm reports as a
+Rust `panic_any` (`nockvm/src/mem.rs`) rather than a %meme bail, killing
+the `serf` thread. Left alone the process stays up and NACKs every poke
+forever, bricked but still answering on its port.
 
-```bash
-curl -m 5 -XPOST localhost:8080/api/action \
-  -d '{"update-source":{"id":1,"src":"=/(f |=(a=@ $(a +(a))) (f 0))"}}'
-# then run that cell; thereafter every request 400s, permanently
-```
+`main.rs` installs a panic hook that aborts instead, and sets
+`save_interval` to 1s, so the failure mode is now: process dies, a
+supervisor restarts it, state comes back from the last checkpoint about a
+second old, and the offending cell's source is preserved so it can be
+edited. Verified end to end, including that the killer poke is not
+replayed into a crash loop.
 
-Because the process never exits, a supervisor will not restart it. A
-non-allocating infinite loop is a distinct case: 100% CPU forever, since
-`BAIL_INTR` is defined in nockvm's interpreter and never used — the
-opcode loop never polls the cancel token. **Do not expose this to input
-you do not trust** until one of those is fixed.
-
-**A POST response can be served for `GET /`.** The driver's response
-cache is keyed on URI alone with no per-response opt-out, and a non-GET
-200 can land in the GET cache. `main.rs` forces `EXPIRE_CACHE=1`, which
-bounds the staleness window to one second rather than the process
-lifetime; it does not eliminate it. Fixing it properly means patching the
-driver to key on method.
+Both shapes of runaway hit this — one that grows an atom, and a
+tail-recursive loop that does not — so in practice runaway cells fail
+loudly and recoverably rather than silently and permanently. What this
+does *not* do is prevent the denial of service: anyone who can run a cell
+can restart the process at will. That needs either a fuel-limited
+evaluator in Hoon (vendoring `+mink` without its jet hint and threading a
+step counter, at a large interpretation cost) or a nockvm patch making
+the interpreter poll its cancel token. Neither is done.
 
 **Serve JS/CSS bundles from `WEB_DIR`, not from Hoon.** The driver's
 response path uses `to_bytes_until_nul` and then `copy_from_slice`, so
-any response body containing a `0x00` byte panics it.
+any response body containing a `0x00` byte panics it — which, with the
+panic hook, now takes the process down.
