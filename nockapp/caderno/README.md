@@ -4,11 +4,33 @@ A NockApp port of the %caderno executable notebook platform: the same
 notebook model and the same Hoon evaluator, served from a single binary
 instead of an Urbit ship.
 
-**Status: working kernel, no UI yet.** Notebooks, cells, Hoon evaluation
-with an accumulating subject, and a JSON API all work and persist across
-restarts. The React UI in `../../ui` has not been pointed at it.
+**Status: working.** Notebooks, cells, Hoon evaluation with an
+accumulating subject, a JSON API, and the React UI in `../../ui` all work
+and persist across restarts.
 
 ## Building
+
+The UI build and the kernel build are **coupled**. Vite content-hashes
+the bundle filenames, and `index.html` — which names them — is baked into
+the kernel by `/*  index  %html  /app/site/index/html`. So any UI change
+means re-copying `index.html` and re-running `hoonc`, or `GET /` will
+serve a page pointing at bundles that no longer exist:
+
+```bash
+cd ../../ui && npm run build && cd -
+cp ../../ui/dist/index.html hoon/app/site/index.html
+hoonc hoon/app/app.hoon hoon
+cargo build --release
+WEB_DIR=$PWD/../../ui/dist ./target/release/caderno
+```
+
+Only `index.html` is baked in; the hashed JS/CSS come from `WEB_DIR`,
+which the runtime serves at a hardcoded `/static` prefix (hence
+`base: '/static/'` in `vite.config.ts`). `ui/dist` is gitignored, so a
+fresh checkout must build the UI before `WEB_DIR` points at anything.
+
+For UI development, `npm run dev` proxies `/api/*` to `127.0.0.1:8080`,
+so the binary can keep running while vite serves the app with HMR.
 
 Requires `hoonc` and `nockup`, plus the nightly pinned in
 `rust-toolchain.toml`.
@@ -27,7 +49,9 @@ rewritten.
 
 ## API
 
-Everything is POST, and every API response is **201, not 200**. That is
+`GET /` serves the UI's `index.html`, as does any other unmatched GET, so
+a client-side deep link survives a refresh. The API itself is all POST,
+and every API response is **201, not 200**. That is
 load-bearing: the driver caches responses in a single global slot (not a
 map -- there is no URI key), writing it on any effect whose status is
 exactly 200 and reading it on any GET. A 200 from `POST /api/state` would

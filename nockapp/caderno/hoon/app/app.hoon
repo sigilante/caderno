@@ -6,6 +6,16 @@
 ::
 ::    POST /api/state    -> full state snapshot
 ::    POST /api/action   -> apply one action, respond with the snapshot
+::    GET  *             -> the React UI's index.html
+::
+::  Only index.html is baked in here; its hashed JS/CSS bundles are served
+::  by the runtime's ServeDir from WEB_DIR, mounted at a hardcoded /static.
+::  They must not be served from Hoon: the driver's response path runs
+::  +to-bytes-until-nul over the body, so a single 0x00 byte -- routine in
+::  a minified bundle -- panics it, and the panic hook makes that fatal.
+::
+::  Every unmatched GET answers index.html rather than 404 so that a
+::  client-side route survives a refresh. Unknown POST paths still 404.
 ::
 ::  Both answer 201, not 200, and that is load-bearing. The http driver
 ::  caches responses in a single global slot -- not a map, no URI key --
@@ -19,6 +29,10 @@
 /+  *json
 /+  cn=caderno
 /=  *  /common/wrapper
+::  The built UI's entry page, baked into the kernel as [@ud @t]. Rebuild it
+::  with `vite build` and re-copy it whenever the UI changes: the bundle
+::  filenames it references are content-hashed.
+/*  index  %html  /app/site/index/html
 =>
 |%
 +$  server-state  [%0 store:cn]
@@ -36,24 +50,6 @@
   ^-  effect
   (json-response id status [%o (~(gas by *(map @t json)) ~[['error' [%s msg]]])])
 ::
-++  landing
-  ^-  @t
-  '''
-  <!doctype html>
-  <html><head><meta charset="utf-8"><title>caderno</title></head>
-  <body style="font-family:ui-monospace,monospace;max-width:44rem;margin:3rem auto">
-    <h1>caderno</h1>
-    <p>An executable notebook. The UI is not wired up yet; the API is:</p>
-    <pre>
-  POST /api/state
-  POST /api/action   {"run-cell": {"id": 1}}
-                     {"insert-cell": {"after": 1, "type": "code"}}
-                     {"update-source": {"id": 1, "src": "(add 2 2)"}}
-                     {"run-all": true}
-                     {"reset-subject": true}
-    </pre>
-  </body></html>
-  '''
 --
 ::
 =>
@@ -85,11 +81,18 @@
       !!
     =/  [id=@ uri=@t =method headers=(list header) body=(unit octs)]  +.u.sof-cau
     ::
+    ::  Any GET is the app shell: `/`, and equally a deep link like
+    ::  /notebook/main, which the client router resolves once it boots.
+    ::  /static/* never reaches here -- the runtime serves it directly.
+    ::
+    ::  A 200 here is deliberate and safe, unlike a 200 from the API: the
+    ::  driver's one cache slot then holds this page, which is the only
+    ::  thing it should ever hold.
     ?:  ?=(%'GET' method)
       :_  state
       :_  ~
       ^-  effect
-      [%res id %200 ['content-type' 'text/html']~ (to-octs landing)]
+      [%res id %200 ['content-type' 'text/html']~ (to-octs q.index)]
     ::
     ?.  ?=(%'POST' method)
       [~[(error-response id 405 'method not allowed')] state]
