@@ -1,0 +1,5 @@
+# The nockchain crates at this rev use the unstable `core::hint::cold_path`
+# feature, which requires a newer nightly than nockup's ambient toolchain.
+# Pin the same nightly the nockchain workspace pins.
+[toolchain]
+channel = "nightly-2026-04-03"
