@@ -1,89 +1,54 @@
-::  caderno spike: evaluate Hoon source over HTTP
+::  caderno: an executable notebook, as a NockApp.
 ::
-::  Phase 0 proof: that a hoonc-compiled NockApp kernel can
-::  (a) capture its own compilation subject with !>(..add),
-::  (b) ream/slap arbitrary user source against it,
-::  (c) trap crashes with +mule, and
-::  (d) accumulate the subject across evaluations via +slop.
+::  A port of the %caderno Gall agent. The notebook model and the Hoon
+::  evaluator are in /lib/caderno; this file is the kernel shell and the
+::  HTTP surface.
+::
+::  API, all POST -- the http driver's response cache is keyed on URI
+::  alone and consulted only for GET, so keeping the API on POST sidesteps
+::  it entirely:
+::
+::    POST /api/state    -> full state snapshot
+::    POST /api/action   -> apply one action, respond with the snapshot
 ::
 /+  *http
 /+  *json
+/+  cn=caderno
 /=  *  /common/wrapper
 =>
 |%
-+$  server-state  [%0 subject=(unit vase)]
++$  server-state  [%0 store:cn]
 ::
-::  +fresh-subject: a vase of this kernel's own compilation context.
+++  json-response
+  |=  [id=@ status=@ud j=json]
+  ^-  effect
+  :*  %res  id  status
+      ['content-type' 'application/json']~
+      (to-octs (en-json j))
+  ==
 ::
-::    This is the whole spike. If `!>(..add)` yields the Hoon stdlib
-::    here the way it does inside a Gall agent, the caderno eval core
-::    ports verbatim.
+++  error-response
+  |=  [id=@ status=@ud msg=@t]
+  ^-  effect
+  (json-response id status [%o (~(gas by *(map @t json)) ~[['error' [%s msg]]])])
 ::
-++  fresh-subject  ^-(vase !>(.))
-::
-::  +tang-to-cord: render a stack trace as one cord
-::
-++  tang-to-cord
-  |=  =tang
-  ^-  @t
-  %-  crip
-  %-  zing
-  %+  join  "\0a"
-  %+  turn  (flop tang)
-  |=(t=tank ~(ram re t))
-::
-::  +trim: strip trailing whitespace (curl adds a newline; +ream won't)
-::
-++  trim
-  |=  t=@t
-  ^-  @t
-  =/  cs=(list @tD)  (flop (trip t))
-  |-  ^-  @t
-  ?~  cs  ''
-  ?:  ?|(=(32 i.cs) =(10 i.cs) =(9 i.cs) =(13 i.cs))
-    $(cs t.cs)
-  (crip (flop cs))
-::
-::  +eval-hoon: evaluate source against a subject
-::
-::    Ported unchanged from desk/app/caderno.hoon:66. On success the
-::    result is slopped onto the front of the subject, so cell N+1
-::    reaches cell N's value at `-`. On failure the subject is untouched.
-::
-++  eval-hoon
-  |=  [src=@t subj=vase]
-  ^-  [out=@t new=vase]
-  =/  parsed  (mule |.((ream src)))
-  ?:  ?=(%| -.parsed)
-    [(cat 3 'ParseError: ' (tang-to-cord p.parsed)) subj]
-  =/  evaled  (mule |.((slap subj p.parsed)))
-  ?:  ?=(%| -.evaled)
-    [(cat 3 'EvalError: ' (tang-to-cord p.evaled)) subj]
-  [(crip ~(ram re (sell p.evaled))) (slop p.evaled subj)]
-::
-++  json-probe
-  |=  src=@t
-  ^-  @t
-  ::  round-trip: parse the body as JSON, wrap it, re-encode
-  =/  parsed=(unit json)  (de-json src)
-  ?~  parsed  'de-json: parse failed'
-  %-  en-json
-  [%o (~(gas by *(map @t json)) ~[['ok' [%b &]] ['echo' u.parsed]])]
-::
-++  usage
+++  landing
   ^-  @t
   '''
-  caderno nockapp spike
-
-    POST /eval    body is Hoon source; responds with the pretty-printed result
-    POST /reset   discard the accumulated subject
-
-  Try:
-    curl -s -XPOST localhost:8080/eval -d '(add 2 2)'
-    curl -s -XPOST localhost:8080/eval -d '(dec 0)'
-    curl -s -XPOST localhost:8080/eval -d '=/(x 7 (mul x x))'
-    curl -s -XPOST localhost:8080/eval -d '-'
-
+  <!doctype html>
+  <html><head><meta charset="utf-8"><title>caderno</title></head>
+  <body style="font-family:ui-monospace,monospace;max-width:44rem;margin:3rem auto">
+    <h1>caderno</h1>
+    <p>An executable notebook. The UI is not wired up yet; the API is:</p>
+    <pre>
+  POST /api/state
+  POST /api/action   {"run-cell": {"id": 1}}
+                     {"insert-cell": {"after": 1, "type": "code"}}
+                     {"update-source": {"id": 1, "src": "(add 2 2)"}}
+                     {"run-all": true}
+                     {"reset-subject": true}
+    </pre>
+  </body></html>
   '''
 --
 ::
@@ -98,7 +63,8 @@
     |=  arg=server-state
     ^-  server-state
     ::  Drop the accumulated subject on upgrade: a stored vase carries
-    ::  types from the old kernel. Same reasoning as caderno's on-load.
+    ::  types from the old kernel, so it cannot be trusted across one.
+    ::  Notebooks and their recorded outputs survive.
     arg(subject ~)
   ::
   ++  peek
@@ -111,7 +77,7 @@
     ^-  [(list effect) server-state]
     =/  sof-cau=(unit cause)  ((soft cause) cause.input.ovum)
     ?~  sof-cau
-      ~&  "cause incorrectly formatted!"
+      ~&  "caderno: malformed cause"
       !!
     =/  [id=@ uri=@t =method headers=(list header) body=(unit octs)]  +.u.sof-cau
     ::
@@ -119,42 +85,31 @@
       :_  state
       :_  ~
       ^-  effect
-      [%res id %200 ['content-type' 'text/plain']~ (to-octs usage)]
+      [%res id %200 ['content-type' 'text/html']~ (to-octs landing)]
     ::
     ?.  ?=(%'POST' method)
-      [~[[%res id %405 ~ ~]] state]
+      [~[(error-response id 405 'method not allowed')] state]
     ::
-    ?:  =('/reset' uri)
-      :_  state(subject ~)
-      :_  ~
-      ^-  effect
-      [%res id %200 ['content-type' 'text/plain']~ (to-octs 'subject reset\0a')]
+    ?:  =('/api/state' uri)
+      =/  s  (ensure-init:cn +.state)
+      :_  state(+ s)
+      ~[(json-response id 200 (store-to-json:cn s))]
     ::
-    ?:  =('/json' uri)
-      ?~  body  [~[[%res id %400 ~ ~]] state]
-      :_  state
-      :_  ~
-      ^-  effect
-      :*  %res  id  %200  ['content-type' 'application/json']~
-          (to-octs (cat 3 (json-probe (trim q.u.body)) '\0a'))
-      ==
-    ::
-    ?.  =('/eval' uri)
-      [~[[%res id %404 ~ ~]] state]
+    ?.  =('/api/action' uri)
+      [~[(error-response id 404 'no such route')] state]
     ::
     ?~  body
-      [~[[%res id %400 ~ (to-octs 'empty body\0a')]] state]
+      [~[(error-response id 400 'empty body')] state]
     ::
-    =/  src=@t  (trim q.u.body)
-    =/  subj=vase  ?~(subject.state fresh-subject u.subject.state)
-    =/  res  (eval-hoon src subj)
-    :_  state(subject `new.res)
-    :_  ~
-    ^-  effect
-    :*  %res  id  %200
-        ['content-type' 'text/plain']~
-        (to-octs (cat 3 out.res '\0a'))
-    ==
+    ?~  parsed=(de-json q.u.body)
+      [~[(error-response id 400 'body is not valid JSON')] state]
+    ::
+    ?~  act=(json-to-action:cn u.parsed)
+      [~[(error-response id 400 'unrecognized action')] state]
+    ::
+    =/  s  (apply:cn u.act +.state)
+    :_  state(+ s)
+    ~[(json-response id 200 (store-to-json:cn s))]
   --
 --
 ((moat |) inner)
