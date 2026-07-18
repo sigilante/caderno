@@ -245,12 +245,13 @@ function CellRow({ cell, isRunning, onRun, onDelete, onInsert, onUpdateSrc, onTo
 
 function renderMd(src: string, accent: string): string {
   // Escape all five HTML-significant chars — including quotes, so a link href
-  // can't break out of its attribute. Notebook source is attacker-controlled
-  // (followed/forked from other ships), rendered via dangerouslySetInnerHTML.
+  // can't break out of its attribute. Notebook source is arbitrary text from
+  // the store — including imported notebooks — rendered via
+  // dangerouslySetInnerHTML.
   const esc = (x: string) => x.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
   // Only allow safe link schemes; block javascript:/data:/vbscript: etc.
   const safeHref = (h: string) => /^(?:https?:\/\/|mailto:|\/|#)/i.test(h.trim()) ? h : '#'
-  // Images travel embedded in published notebooks: allow raster data: URIs
+  // Images travel embedded in notebook source: allow raster data: URIs
   // (self-contained) and https/relative URLs. Block data:image/svg+xml — SVG is
   // an executable document — and every other scheme.
   const safeSrc = (s: string) => {

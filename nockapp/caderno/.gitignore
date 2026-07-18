@@ -1,0 +1,4 @@
+/target
+/out.jam
+/.data.*
+/hoon/packages/

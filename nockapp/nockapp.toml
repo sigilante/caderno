@@ -1,0 +1,6 @@
+[package]
+name = "caderno"
+
+[dependencies]
+"urbit/lull" = "@latest"
+"urbit/zuse" = "@k409"
