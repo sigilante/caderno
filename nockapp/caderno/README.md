@@ -5,8 +5,14 @@ notebook model and the same Hoon evaluator, served from a single binary
 instead of an Urbit ship.
 
 **Status: working.** Notebooks, cells, Hoon evaluation with an
-accumulating subject, a JSON API, and the React UI in `../../ui` all work
+accumulating subject, a JSON API, and the React UI in `../ui` all work
 and persist across restarts.
+
+The UI lives at `nockapp/ui`, forked from the desk's `ui/` when the port
+landed. The desk still ships its own Urbit UI from the repo-root `ui/`,
+which talks to Gall over an Eyre channel; this one talks to the NockApp
+HTTP API. They are separate trees on purpose, so the desk's glob can
+still be rebuilt from the original.
 
 ## Building
 
@@ -57,11 +63,11 @@ the driver's response path panics on any body containing a `0x00` byte.
 point at until the UI is built. `make` handles that; by hand it is:
 
 ```bash
-cd ../../ui && npm run build && cd -
-cp ../../ui/dist/index.html hoon/app/site/index.html
+cd ../ui && npm run build && cd -
+cp ../ui/dist/index.html hoon/app/site/index.html
 hoonc hoon/app/app.hoon hoon
 cargo build --release
-WEB_DIR=$PWD/../../ui/dist ./target/release/caderno
+WEB_DIR=$PWD/../ui/dist ./target/release/caderno
 ```
 
 The kernel is read from `out.jam` in the working directory at *runtime*,
@@ -72,7 +78,7 @@ does not reappear.
 
 ### UI development
 
-`npm run dev` in `../../ui` serves the app with HMR and proxies `/api/*`
+`npm run dev` in `../ui` serves the app with HMR and proxies `/api/*`
 to `127.0.0.1:8080`, so the binary can keep running while you iterate.
 Nothing needs rebuilding in this directory during that loop — the
 coupling above only matters for the bundled build that `make` produces.

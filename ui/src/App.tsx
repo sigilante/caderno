@@ -1,25 +1,32 @@
 import { useEffect, useReducer, useCallback, useRef } from 'react'
 import {
-  fetchState, actions,
-  type Notebook, type Cell, type Snapshot,
+  fetchActiveNotebook, fetchKelvins, fetchLogStatus, fetchSoleSessions, discoverKernels, openChannel, closeChannel, actions, ship,
+  type Notebook, type Cell, type Output, type Update, type Kelvins, type SoleSession,
 } from './api'
 import { NotebookIndex } from './components/NotebookIndex'
 import { NotebookView } from './components/NotebookView'
+import { LookupView } from './components/LookupView'
 
 // ── state ────────────────────────────────────────────────────────────────────
 
 type AppState = {
-  view: 'list' | 'nb'
+  view: 'list' | 'nb' | 'lookup'
   active: string | null
   notebooks: NbEntry[]
-  online: boolean
+  channelOpen: boolean
+  logMounted: boolean
   error: string | null
-  //  Cells with an in-flight run request. Evaluation on the backend is
-  //  synchronous — there is no %running status to subscribe to — so this
-  //  tracks the HTTP round trip and nothing else. It always clears when the
-  //  request settles.
-  pending: Set<number>
+  running: Set<number>
+  kelvins: Kelvins | null
+  soleSessions: SoleSession[] | null  // active sole sessions on the current shoe kernel, null if kernel is in-process (hoon)
+  kernels: string[]  // available kernels: in-process 'hoon' + discovered shoe agents
+  published: string[]  // local notebook ids exposed to followers
+  follows: FollowEntry[]  // read-only remote notebooks we subscribe to
+  lookup: { who: string; items: CatalogEntry[] } | null  // current by-ship lookup result
 }
+
+export type FollowEntry = { who: string; id: string; title: string }
+export type CatalogEntry = { id: string; title: string }
 
 export type NbEntry = {
   id: string
@@ -28,10 +35,7 @@ export type NbEntry = {
   kernel: string
   status: 'new' | 'edited' | 'saved'
   cells: CellEntry[]
-  //  A snapshot carries cells only for the notebook that is active, so an
-  //  entry we have only ever seen in `nb-list` has none. False means "cells
-  //  unknown", not "no cells".
-  loaded: boolean
+  counter: number
 }
 
 export type CellEntry = {
@@ -41,7 +45,19 @@ export type CellEntry = {
   out: { ok: boolean; text: string } | null
   count: number | null
   editing: boolean
-  fresh?: boolean  // true for cells that appeared in the last snapshot → autoFocus
+  fresh?: boolean  // true for cells just inserted this session → textarea autoFocus
+}
+
+function notebookToEntry(id: string, nb: Notebook): NbEntry {
+  return {
+    id,
+    name: nb.title,
+    stardate: toUrbitDate(Date.now()),
+    kernel: nb.kernel,
+    status: 'saved',
+    counter: 0,
+    cells: nb.cells.map(cellToEntry),
+  }
 }
 
 function cellToEntry(c: Cell): CellEntry {
@@ -66,95 +82,144 @@ function toUrbitDate(ms: number): string {
 }
 
 type Action =
-  | { type: 'snapshot'; snap: Snapshot; dirty: Set<number> }
+  | { type: 'loaded'; id: string; nb: Notebook }
+  | { type: 'nb-list'; items: { id: string; title: string }[] }
+  | { type: 'cell-output'; id: number; out: Output; count: number }
+  | { type: 'cell-status'; id: number; status: string }
+  | { type: 'cell-added'; cell: Cell; after: number | null }
+  | { type: 'cell-deleted'; id: number }
+  | { type: 'channel-open' }
+  | { type: 'log-mounted' }
+  | { type: 'log-committed' }
   | { type: 'error'; msg: string }
-  | { type: 'set-view'; view: 'list' | 'nb'; id?: string }
+  | { type: 'set-view'; view: 'list' | 'nb' | 'lookup'; id?: string }
+  | { type: 'set-kernel'; kernel: string }
   | { type: 'set-src'; id: number; src: string }
   | { type: 'toggle-edit'; id: number }
+  | { type: 'cell-run-result'; id: number; ok: boolean; text: string; count: number }
   | { type: 'set-cell-type'; id: number; cellType: 'code' | 'markdown' }
   | { type: 'rename-nb'; title: string }
-  | { type: 'run-begin'; ids: number[] }
-  | { type: 'run-end'; ids: number[] }
-
-//  Fold a snapshot's notebook into the entry we already hold, so purely local
-//  editor state survives. `dirty` is the set of cells whose source the user has
-//  typed into since the last write we sent; the backend's copy of those is
-//  known-stale, so the local text wins until the write lands.
-function mergeNotebook(old: NbEntry | undefined, id: string, nb: Notebook, dirty: Set<number>): NbEntry {
-  const oldCells = new Map((old?.cells ?? []).map(c => [c.id, c]))
-  //  Only autofocus/open cells that appeared *after* we had already seen this
-  //  notebook's cells — otherwise the first load would focus everything.
-  const seen = old?.loaded ?? false
-  const cells = nb.cells.map(c => {
-    const entry = cellToEntry(c)
-    const prev = oldCells.get(c.id)
-    if (prev) {
-      return { ...entry, editing: prev.editing, src: dirty.has(c.id) ? prev.src : entry.src }
-    }
-    if (!seen) return entry
-    //  A new markdown cell opens straight into its editor; a new code cell
-    //  gets autoFocus on its textarea.
-    return c.type === 'markdown' ? { ...entry, editing: true } : { ...entry, fresh: true }
-  })
-  return {
-    id,
-    name: nb.title,
-    stardate: old?.stardate ?? toUrbitDate(Date.now()),
-    kernel: nb.kernel,
-    status: 'saved',
-    cells,
-    loaded: true,
-  }
-}
+  | { type: 'set-kelvins'; kelvins: Kelvins }
+  | { type: 'set-log-mounted'; mounted: boolean }
+  | { type: 'set-sole-sessions'; sessions: SoleSession[] | null }
+  | { type: 'set-kernels'; kernels: string[] }
+  | { type: 'set-published'; published: string[] }
+  | { type: 'set-follows'; follows: FollowEntry[] }
+  | { type: 'set-lookup'; who: string; items: CatalogEntry[] }
 
 function reducer(state: AppState, action: Action): AppState {
+  const activeNb = () => state.notebooks.find(n => n.id === state.active) ?? null
+
   switch (action.type) {
-    //  Every backend response is a full snapshot: the active notebook in
-    //  full, plus id/title for every notebook. Non-active notebooks carry no
-    //  cells, so we keep whatever we last loaded for them.
-    case 'snapshot': {
-      const activeId = action.snap.state.id
-      const prev = new Map(state.notebooks.map(n => [n.id, n]))
-      const notebooks = action.snap['nb-list'].map(item => {
-        const old = prev.get(item.id)
-        if (item.id === activeId) {
-          return mergeNotebook(old, item.id, action.snap.state.nb, action.dirty)
-        }
-        return old
-          ? { ...old, name: item.title }
-          : {
-            id: item.id, name: item.title, stardate: toUrbitDate(Date.now()),
-            kernel: 'hoon', status: 'saved' as const, cells: [], loaded: false,
-          }
-      })
-      return { ...state, notebooks, active: activeId, online: true, error: null }
+    case 'loaded': {
+      const entry = notebookToEntry(action.id, action.nb)
+      const existing = state.notebooks.findIndex(n => n.id === action.id)
+      const isNew = existing === -1
+      const notebooks = isNew
+        ? [...state.notebooks, entry]
+        : state.notebooks.map((n, i) => i === existing ? entry : n)
+      const active = isNew ? action.id : (state.active ?? action.id)
+      // Navigate to new notebooks automatically (e.g. after %new-notebook poke)
+      const view = isNew ? 'nb' : state.view
+      return { ...state, notebooks, active, view, error: null }
     }
+    case 'nb-list': {
+      const existingIds = new Set(state.notebooks.map(n => n.id))
+      const incomingIds = new Set(action.items.map(i => i.id))
+      let notebooks = state.notebooks
+        .filter(n => incomingIds.has(n.id))
+        .map(n => {
+          const item = action.items.find(i => i.id === n.id)
+          return item ? { ...n, name: item.title } : n
+        })
+      for (const item of action.items) {
+        if (!existingIds.has(item.id)) {
+          notebooks = [...notebooks, {
+            id: item.id, name: item.title,
+            stardate: toUrbitDate(Date.now()),
+            kernel: 'hoon', status: 'saved' as const,
+            cells: [], counter: 0,
+          }]
+        }
+      }
+      return { ...state, notebooks }
+    }
+    case 'cell-output': {
+      const out = action.out.text != null
+        ? { ok: true, text: action.out.text! }
+        : { ok: false, text: (action.out.ename ?? '') + ': ' + (action.out.evalue ?? '') }
+      return mutCells(state, action.id, c => ({ ...c, out, count: action.count }))
+    }
+    case 'cell-status': {
+      const running = new Set(state.running)
+      if (action.status === 'running') running.add(action.id)
+      else running.delete(action.id)
+      // Also update cell output on 'done'/'error' to clear stale EXEC state
+      // (output update arrives separately via cell-output; just update running set here)
+      return { ...state, running }
+    }
+    case 'cell-added': {
+      const nb = activeNb(); if (!nb) return state
+      const ce = cellToEntry(action.cell)
+      // Markdown → editing mode; code → fresh=true so textarea gets autoFocus
+      const ce2 = ce.type === 'markdown' ? { ...ce, editing: true } : { ...ce, fresh: true }
+      return mutNb(state, nb.id, n => ({
+        ...n,
+        cells: action.after == null
+          ? [...n.cells, ce2]
+          : insertAfterCell(n.cells, action.after, ce2),
+      }))
+    }
+    case 'cell-deleted': {
+      const nb = activeNb(); if (!nb) return state
+      return mutNb(state, nb.id, n => ({
+        ...n, cells: n.cells.length > 1 ? n.cells.filter(c => c.id !== action.id) : n.cells,
+      }))
+    }
+    case 'channel-open':
+      return { ...state, channelOpen: true }
+    case 'log-mounted':
+      return { ...state, logMounted: true }
+    case 'log-committed':
+      return state
+    case 'set-log-mounted':
+      return { ...state, logMounted: action.mounted }
     case 'error':
-      return { ...state, error: action.msg, online: false }
+      return { ...state, error: action.msg }
     case 'set-view':
       return { ...state, view: action.view, active: action.id ?? state.active }
-    case 'set-src':
+    case 'set-kernel': {
+      const nb = activeNb(); if (!nb) return state
+      return mutNb(state, nb.id, n => ({ ...n, kernel: action.kernel }))
+    }
+    case 'set-src': {
       return mutCells(state, action.id, c => ({ ...c, src: action.src }))
-    case 'toggle-edit':
+    }
+    case 'toggle-edit': {
       return mutCells(state, action.id, c => ({ ...c, editing: !c.editing }))
-    //  Optimistic, so the row does not flicker while the request is in flight;
-    //  the snapshot that follows confirms it.
-    case 'set-cell-type':
+    }
+    case 'cell-run-result': {
+      return mutCells(state, action.id, c => ({ ...c, out: { ok: action.ok, text: action.text }, count: action.count }))
+    }
+    case 'set-cell-type': {
       return mutCells(state, action.id, c => ({ ...c, type: action.cellType, out: null, count: null }))
+    }
     case 'rename-nb': {
-      if (!state.active) return state
-      return mutNb(state, state.active, n => ({ ...n, name: action.title }))
+      const nb = activeNb(); if (!nb) return state
+      return mutNb(state, nb.id, n => ({ ...n, name: action.title }))
     }
-    case 'run-begin': {
-      const pending = new Set(state.pending)
-      for (const id of action.ids) pending.add(id)
-      return { ...state, pending }
-    }
-    case 'run-end': {
-      const pending = new Set(state.pending)
-      for (const id of action.ids) pending.delete(id)
-      return { ...state, pending }
-    }
+    case 'set-kelvins':
+      return { ...state, kelvins: action.kelvins }
+    case 'set-sole-sessions':
+      return { ...state, soleSessions: action.sessions }
+    case 'set-kernels':
+      return { ...state, kernels: action.kernels }
+    case 'set-published':
+      return { ...state, published: action.published }
+    case 'set-follows':
+      return { ...state, follows: action.follows }
+    case 'set-lookup':
+      return { ...state, lookup: { who: action.who, items: action.items } }
     default: return state
   }
 }
@@ -164,77 +229,143 @@ function mutNb(state: AppState, id: string, fn: (n: NbEntry) => NbEntry): AppSta
 }
 
 function mutCells(state: AppState, cellId: number, fn: (c: CellEntry) => CellEntry): AppState {
-  if (!state.active) return state
-  return mutNb(state, state.active, n => ({ ...n, cells: n.cells.map(c => c.id === cellId ? fn(c) : c) }))
+  const nb = state.notebooks.find(n => n.id === state.active)
+  if (!nb) return state
+  return mutNb(state, nb.id, n => ({ ...n, cells: n.cells.map(c => c.id === cellId ? fn(c) : c) }))
+}
+
+function insertAfterCell(cells: CellEntry[], after: number, newCell: CellEntry): CellEntry[] {
+  const idx = cells.findIndex(c => c.id === after)
+  if (idx === -1) return [...cells, newCell]
+  return [...cells.slice(0, idx + 1), newCell, ...cells.slice(idx + 1)]
 }
 
 // ── component ────────────────────────────────────────────────────────────────
 
+// LCARS accent per kernel; unknown discovered agents get the neutral blue.
+const KERNEL_COLORS: Record<string, string> = { hoon: '#cc88ff', north: '#ff9900' }
+const kernelColor = (k: string) => KERNEL_COLORS[k] ?? '#6c8cff'
+
 export default function App() {
   const [state, dispatch] = useReducer(reducer, {
-    view: 'list', active: null, notebooks: [], online: false, error: null,
-    pending: new Set<number>(),
+    view: 'list', active: null, notebooks: [], channelOpen: false, logMounted: false, error: null, running: new Set<number>(), kelvins: null, soleSessions: null, kernels: ['hoon'], published: [], follows: [], lookup: null,
   })
   const stateRef = useRef(state)
   stateRef.current = state
 
-  //  Cells the user has typed into since the last source write we sent, and a
-  //  per-cell sequence number so a stale write's completion cannot clear a
-  //  keystroke that arrived after it.
-  const dirty = useRef(new Set<number>())
-  const srcSeq = useRef(new Map<number, number>())
-  const bumpSrc = (id: number) => {
-    const n = (srcSeq.current.get(id) ?? 0) + 1
-    srcSeq.current.set(id, n)
-    dirty.current.add(id)
-    return n
-  }
-  const settleSrc = (id: number, n: number) => {
-    if (srcSeq.current.get(id) === n) dirty.current.delete(id)
-  }
-
-  const apply = useCallback((snap: Snapshot) => {
-    dispatch({ type: 'snapshot', snap, dirty: new Set(dirty.current) })
+  const handleUpdate = useCallback((upd: Update) => {
+    if ('state' in upd)           dispatch({ type: 'loaded', id: upd['state'].id, nb: upd['state'].nb })
+    else if ('nb-list' in upd)    dispatch({ type: 'nb-list', items: upd['nb-list'] })
+    else if ('cell-output' in upd)   dispatch({ type: 'cell-output', id: upd['cell-output'].id, out: upd['cell-output'].out, count: upd['cell-output'].count })
+    else if ('cell-status' in upd)   dispatch({ type: 'cell-status', id: upd['cell-status'].id, status: upd['cell-status'].status })
+    else if ('cell-added' in upd)    dispatch({ type: 'cell-added', cell: upd['cell-added'].c, after: upd['cell-added'].after })
+    else if ('cell-deleted' in upd)  dispatch({ type: 'cell-deleted', id: upd['cell-deleted'].id })
+    else if ('log-mounted' in upd)   dispatch({ type: 'log-mounted' })
+    else if ('log-committed' in upd) dispatch({ type: 'log-committed' })
+    else if ('published' in upd)     dispatch({ type: 'set-published', published: upd['published'] })
+    else if ('follows' in upd)       dispatch({ type: 'set-follows', follows: upd['follows'] })
+    else if ('lookup' in upd)        dispatch({ type: 'set-lookup', who: upd['lookup'].who, items: upd['lookup'].items })
   }, [])
 
-  //  Every backend call funnels through here: apply the snapshot, or surface
-  //  the error. Returns the snapshot so callers can chain on it.
-  const send = useCallback(async (p: Promise<Snapshot>): Promise<Snapshot | null> => {
-    try {
-      const snap = await p
-      apply(snap)
-      return snap
-    } catch (e) {
-      dispatch({ type: 'error', msg: e instanceof Error ? e.message : String(e) })
-      return null
-    }
-  }, [apply])
+  useEffect(() => {
+    fetchActiveNotebook()
+      .then(({ id, nb }) => dispatch({ type: 'loaded', id, nb }))
+      .catch(() => dispatch({ type: 'error', msg: 'Could not reach ship' }))
+    fetchKelvins()
+      .then(kelvins => dispatch({ type: 'set-kelvins', kelvins }))
+      .catch(() => {})
+    fetchLogStatus()
+      .then(mounted => dispatch({ type: 'set-log-mounted', mounted }))
+      .catch(() => {})
+    openChannel(handleUpdate, () => dispatch({ type: 'channel-open' }))
+    return () => { closeChannel() }
+  }, [handleUpdate])
 
-  useEffect(() => { send(fetchState()) }, [send])
+  // Discover available kernels once: in-process 'hoon' (always present, not an
+  // agent) + running agents that answer the shoe /x/sole/sessions probe. Nothing
+  // is white-listed — a kernel appears only if detected. If discovery yields no
+  // shoe agents (e.g. offline) we keep just 'hoon'; the active notebook's own
+  // kernel stays selectable regardless via kernelList below.
+  useEffect(() => {
+    let cancelled = false
+    discoverKernels()
+      .then(kernels => { if (!cancelled && kernels.length > 1) dispatch({ type: 'set-kernels', kernels }) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
 
   const activeNb = state.notebooks.find(n => n.id === state.active) ?? null
 
+  // A shoe kernel is any external agent (e.g. north); 'hoon' evaluates in-process
+  // and has no sole sessions. Poll the kernel agent's /x/sole/sessions scry while
+  // its notebook is open so the SESSIONS panel stays live as the backend spawns them.
+  //
+  // A %sole agent multiplexes sessions from every client that drives it, keyed only
+  // by an opaque [who=@p ses=@ta] with no app-ownership field. Caderno opens sessions
+  // named 'caderno' (see caderno.hoon), so we filter to our ship + that name prefix to
+  // show only caderno's sessions and drop foreign ones (e.g. jupytur-*). The '-' prefix
+  // match is forward-compatible with per-notebook naming (caderno-<id>).
+  const shoeKernel = state.view === 'nb' && activeNb && activeNb.kernel !== 'hoon' ? activeNb.kernel : null
+
+  // Kernel picker options: discovered kernels, always including the active
+  // notebook's own kernel so a saved-but-undiscovered kernel stays selectable.
+  const kernelList = activeNb && !state.kernels.includes(activeNb.kernel)
+    ? [...state.kernels, activeNb.kernel]
+    : state.kernels
+  useEffect(() => {
+    if (!shoeKernel) { dispatch({ type: 'set-sole-sessions', sessions: null }); return }
+    let cancelled = false
+    const load = () => fetchSoleSessions(shoeKernel)
+      .then(all => {
+        const mine = all && all.filter(s =>
+          s.ship === ship && (s.session === 'caderno' || s.session.startsWith('caderno-')))
+        if (!cancelled) dispatch({ type: 'set-sole-sessions', sessions: mine ?? null })
+      })
+      .catch(() => {})
+    load()
+    const iv = setInterval(load, 5000)
+    return () => { cancelled = true; clearInterval(iv) }
+  }, [shoeKernel])
+
   // callbacks
-  const onRunAll = () => {
-    const ids = (stateRef.current.notebooks.find(n => n.id === stateRef.current.active)?.cells ?? [])
-      .filter(c => c.type === 'code').map(c => c.id)
-    dispatch({ type: 'run-begin', ids })
-    send(actions.runAll()).finally(() => dispatch({ type: 'run-end', ids }))
-  }
-  const onAddCode = () => { send(actions.insertCell(null, 'code')) }
-  const onAddText = () => { send(actions.insertCell(null, 'markdown')) }
+  const onSetKernel = (k: string) => { dispatch({ type: 'set-kernel', kernel: k }); actions.setKernel(k) }
+  const onRunAll = () => { actions.runAll() }
+  const onAddCode = () => { actions.insertCell(null, 'code') }
+  const onAddText = () => { actions.insertCell(null, 'markdown') }
   const onBack = () => dispatch({ type: 'set-view', view: 'list' })
-  const onResetSubject = () => { send(actions.resetSubject()) }
-  const onNewNb = async () => {
-    const snap = await send(actions.newNotebook())
-    //  %new-notebook switches the backend's active notebook; follow it.
-    if (snap) dispatch({ type: 'set-view', view: 'nb', id: snap.state.id })
-  }
+  const onResetSubject = () => { actions.resetSubject() }
+  const onNewNb = () => { actions.newNotebook() }
   const onOpen = (id: string) => {
     dispatch({ type: 'set-view', view: 'nb', id })
-    send(actions.switchNotebook(id))
+    actions.switchNotebook(id)
   }
-  const onDeleteNb = (id: string) => { send(actions.deleteNotebook(id)) }
+  const onDeleteNb = (id: string) => { actions.deleteNotebook(id) }
+  const onTogglePublish = (id: string) => {
+    if (state.published.includes(id)) actions.unpublish(id)
+    else actions.publish(id)
+  }
+  // Track the single open lookup subscription so it's torn down when we look up
+  // a different ship or leave the view — otherwise each lookup leaks a /published-list sub.
+  const lookupSub = useRef<string | null>(null)
+  const onOpenLookup = () => dispatch({ type: 'set-view', view: 'lookup' })
+  const onLookupShip = (raw: string) => {
+    const who = raw.trim()
+    if (!who) return
+    const patp = who.startsWith('~') ? who : `~${who}`
+    if (lookupSub.current && lookupSub.current !== patp) actions.unlookup(lookupSub.current)
+    lookupSub.current = patp
+    actions.lookup(patp)
+  }
+  const onLeaveLookup = () => {
+    if (lookupSub.current) { actions.unlookup(lookupSub.current); lookupSub.current = null }
+    dispatch({ type: 'set-view', view: 'list' })
+  }
+  const onFollow = (who: string, id: string) => { actions.follow(who, id) }
+  const onUnfollow = (who: string, id: string) => { actions.unfollow(who, id) }
+  const onFork = (who: string, id: string) => {
+    actions.fork(who, id)
+    dispatch({ type: 'set-view', view: 'nb' })
+  }
 
   const srcDebounce = useRef(new Map<number, ReturnType<typeof setTimeout>>())
 
@@ -245,47 +376,38 @@ export default function App() {
       dispatch({ type: 'toggle-edit', id })
       return
     }
-    //  Cancel any pending debounced source update and send it immediately
-    //  before the run, so the backend evaluates what is on screen.
+    // Cancel any pending debounced source update and send it atomically with run-cell.
+    // This guarantees the backend evals the source currently visible in the editor.
     const timeout = srcDebounce.current.get(id)
-    const flush = timeout !== undefined && cell !== undefined
     if (timeout !== undefined) {
       clearTimeout(timeout)
       srcDebounce.current.delete(id)
+      if (cell) { actions.runCellFlushed(id, cell.src); return }
     }
-    const seq = srcSeq.current.get(id) ?? 0
-    dispatch({ type: 'run-begin', ids: [id] })
-    const p = flush ? actions.runCellFlushed(id, cell!.src) : actions.runCell(id)
-    //  The run's snapshot is authoritative for this cell's source, so drop the
-    //  dirty flag first — unless the user typed again while it was in flight.
-    p.then(() => settleSrc(id, seq), () => {})
-    send(p).finally(() => dispatch({ type: 'run-end', ids: [id] }))
-  }, [send])
+    actions.runCell(id)
+  }, [])
 
-  const onDelete = (id: number) => { send(actions.deleteCell(id)) }
-  const onInsertAfter = (id: number) => { send(actions.insertCell(id, 'code')) }
+  const onDelete = (id: number) => { actions.deleteCell(id) }
+  const onInsertAfter = (id: number) => { actions.insertCell(id, 'code') }
 
   const onUpdateSrc = useCallback((id: number, src: string) => {
     dispatch({ type: 'set-src', id, src })
-    const seq = bumpSrc(id)
     const prev = srcDebounce.current.get(id)
     if (prev !== undefined) clearTimeout(prev)
     srcDebounce.current.set(id, setTimeout(() => {
+      actions.updateSource(id, src)
       srcDebounce.current.delete(id)
-      const p = actions.updateSource(id, src)
-      p.then(() => settleSrc(id, seq), () => {})
-      send(p)
     }, 400))
-  }, [send])
+  }, [])
 
   const onToggleEdit = (id: number) => dispatch({ type: 'toggle-edit', id })
   const onSetCellType = (id: number, cellType: 'code' | 'markdown') => {
     dispatch({ type: 'set-cell-type', id, cellType })
-    send(actions.setCellType(id, cellType))
+    actions.setCellType(id, cellType)
   }
   const onRename = (title: string) => {
     dispatch({ type: 'rename-nb', title })
-    send(actions.setTitle(title))
+    actions.setTitle(title)
   }
 
   const stardate = toUrbitDate(Date.now())
@@ -301,7 +423,7 @@ export default function App() {
         <div style={{ position: 'absolute', top: 10, left: 255, right: 10, height: 96, background: '#ff9900', borderRadius: '0 18px 18px 18px', display: 'flex', alignItems: 'center', padding: '0 30px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', lineHeight: .92 }}>
             <span style={{ fontSize: 42, fontWeight: 700, color: '#000', letterSpacing: '-.01em' }}>caderno</span>
-            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#3a2400', letterSpacing: '.34em', marginTop: 3 }}>LCARS · NOTEBOOK · NOCKAPP</span>
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#3a2400', letterSpacing: '.34em', marginTop: 3 }}>LCARS · NOTEBOOK ~{ship}</span>
           </div>
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 26 }}>
             {state.view === 'nb' && activeNb && (
@@ -325,18 +447,71 @@ export default function App() {
         <div style={{ position: 'absolute', top: 178, left: 10, bottom: 10, width: 236, display: 'flex', flexDirection: 'column', gap: 7, fontFamily: "'JetBrains Mono', monospace" }}>
           {state.view === 'nb' ? (
             <>
-              <div style={{ color: '#6b5a3c', fontSize: 10, letterSpacing: '.24em', padding: '2px 14px 0', textAlign: 'right' }}>HOON KERNEL</div>
-              <div className="lc-press" onClick={onRunAll} style={{ height: 54, borderRadius: '0 30px 30px 0', background: '#cc88ff', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 17, letterSpacing: '.06em' }}>RUN ALL ▶</div>
+              <div style={{ color: '#6b5a3c', fontSize: 10, letterSpacing: '.24em', padding: '2px 14px 0', textAlign: 'right' }}>KERNEL</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+                {kernelList.map(k => {
+                  const active = activeNb?.kernel === k
+                  const c = kernelColor(k)
+                  return (
+                    <div
+                      key={k}
+                      className="lc-press"
+                      onClick={() => onSetKernel(k)}
+                      title={k === 'hoon' ? 'in-process Hoon evaluator' : `shoe agent %${k}`}
+                      style={{ flex: '1 1 45%', minWidth: 0, height: 50, borderRadius: 25, background: active ? c : '#181209', color: active ? '#000' : c, border: `1px solid ${active ? c : c + '44'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 15, letterSpacing: '.08em', textTransform: 'uppercase', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', padding: '0 8px' }}
+                    >{k}</div>
+                  )
+                })}
+              </div>
+              {activeNb?.kernel === 'hoon' && (
+                <div className="lc-press" onClick={onRunAll} style={{ height: 54, borderRadius: '0 30px 30px 0', background: '#cc88ff', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 17, letterSpacing: '.06em' }}>RUN ALL ▶</div>
+              )}
               <div className="lc-press" onClick={onAddCode} style={{ height: 50, borderRadius: '0 30px 30px 0', background: '#6c8cff', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 16, letterSpacing: '.04em' }}>+ CODE</div>
               <div className="lc-press" onClick={onAddText} style={{ height: 50, borderRadius: '0 30px 30px 0', background: '#ff8866', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 16, letterSpacing: '.04em' }}>+ TEXT</div>
               <div className="lc-press" onClick={onBack} style={{ height: 50, borderRadius: '0 30px 30px 0', background: '#d9a441', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 16, letterSpacing: '.04em' }}>◂ INDEX</div>
-              <div className="lc-press" onClick={onResetSubject} title="Drop the accumulated Hoon subject" style={{ height: 50, borderRadius: '0 30px 30px 0', background: '#3a2a10', color: '#9a8147', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 14, letterSpacing: '.04em' }}>RESET ENV</div>
+              <div className="lc-press" onClick={onResetSubject} style={{ height: 50, borderRadius: '0 30px 30px 0', background: '#3a2a10', color: '#9a8147', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 14, letterSpacing: '.04em' }}>RESET ENV</div>
+              {activeNb && (() => {
+                const pub = state.published.includes(activeNb.id)
+                return (
+                  <div
+                    className="lc-press"
+                    onClick={() => onTogglePublish(activeNb.id)}
+                    title={pub ? 'Public — others can follow this notebook' : 'Publish so others can follow this notebook'}
+                    style={{ height: 50, borderRadius: '0 30px 30px 0', background: pub ? '#3a4a3a' : '#3a2a10', color: pub ? '#99e6a3' : '#9a8147', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 14, letterSpacing: '.04em' }}
+                  >{pub ? '◉ PUBLISHED' : '○ PUBLISH'}</div>
+                )
+              })()}
             </>
           ) : (
             <>
-              <div style={{ color: '#6b5a3c', fontSize: 10, letterSpacing: '.24em', padding: '2px 14px 0', textAlign: 'right' }}>STORE · CHECKPOINT</div>
+              <div style={{ color: '#6b5a3c', fontSize: 10, letterSpacing: '.24em', padding: '2px 14px 0', textAlign: 'right' }}>CLAY · /caderno</div>
               <div className="lc-press" onClick={onNewNb} style={{ height: 62, borderRadius: '0 0 0 26px', background: '#cc88ff', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 18, letterSpacing: '.03em' }}>+ NEW NOTEBOOK</div>
               <div style={{ height: 50, borderRadius: '0 30px 30px 0', background: '#6c8cff', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 15, letterSpacing: '.03em' }}>{state.notebooks.length} BUFFERS</div>
+              {state.logMounted ? (
+                <div
+                  className="lc-press"
+                  onClick={() => actions.commitLog()}
+                  style={{ height: 50, borderRadius: '0 30px 30px 0', background: '#3a4a3a', color: '#99e6a3', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 15, letterSpacing: '.03em' }}
+                >COMMIT ▸</div>
+              ) : (
+                <div
+                  className="lc-press"
+                  onClick={() => actions.mountLog()}
+                  style={{ height: 50, borderRadius: '0 30px 30px 0', background: '#3a2a10', color: '#9a8147', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 15, letterSpacing: '.03em' }}
+                >MOUNT</div>
+              )}
+              <div
+                className="lc-press"
+                onClick={() => actions.importLog()}
+                title="Load notebooks from the committed %caderno-log desk into state"
+                style={{ height: 50, borderRadius: '0 30px 30px 0', background: '#2a2438', color: '#b79ae0', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 15, letterSpacing: '.03em' }}
+              >◂ IMPORT</div>
+              <div
+                className="lc-press"
+                onClick={onOpenLookup}
+                title="Browse another ship's published notebooks"
+                style={{ height: 50, borderRadius: '0 30px 30px 0', background: '#1c3040', color: '#7fd4ff', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 20, fontWeight: 700, fontSize: 15, letterSpacing: '.03em' }}
+              >◈ LOOKUP</div>
             </>
           )}
 
@@ -351,11 +526,33 @@ export default function App() {
               <div style={{ color: '#cc88ff', fontSize: 18, fontWeight: 500 }}>{(activeNb?.kernel ?? 'hoon').toUpperCase()}</div>
             </div>
             <div>
-              <div style={{ color: '#6b5a3c', fontSize: 10, letterSpacing: '.2em' }}>API</div>
-              <div style={{ color: state.online ? '#99e6a3' : '#9a8147', fontSize: 18, fontWeight: 500 }}>
-                {state.online ? 'ONLINE' : 'OFFLINE'}
+              <div style={{ color: '#6b5a3c', fontSize: 10, letterSpacing: '.2em' }}>CHANNEL</div>
+              <div style={{ color: state.channelOpen ? '#99e6a3' : '#9a8147', fontSize: 18, fontWeight: 500 }}>
+                {state.channelOpen ? 'SUBSCRIBED' : 'OFFLINE'}
               </div>
             </div>
+            {state.soleSessions && (
+              <div>
+                <div style={{ color: '#6b5a3c', fontSize: 10, letterSpacing: '.2em' }}>
+                  SESSIONS · {state.soleSessions.length}
+                </div>
+                {state.soleSessions.length === 0 ? (
+                  <div style={{ color: '#5a4a2c', fontSize: 13, marginTop: 2 }}>none active</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 1, marginTop: 3, maxHeight: 92, overflowY: 'auto' }}>
+                    {state.soleSessions.map(s => (
+                      <div
+                        key={`${s.ship}/${s.session}`}
+                        title={`~${s.ship}/${s.session}`}
+                        style={{ color: '#99e6a3', fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                      >
+                        ▸ ~{s.ship}/{s.session}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -363,7 +560,7 @@ export default function App() {
         {state.view === 'nb' && activeNb ? (
           <NotebookView
             nb={activeNb}
-            running={state.pending}
+            running={state.running}
             onRunCell={onRunCell}
             onDelete={onDelete}
             onInsertAfter={onInsertAfter}
@@ -373,62 +570,89 @@ export default function App() {
             onSetCellType={onSetCellType}
             onRename={onRename}
           />
+        ) : state.view === 'lookup' ? (
+          <LookupView
+            lookup={state.lookup}
+            follows={state.follows}
+            onLookupShip={onLookupShip}
+            onFollow={onFollow}
+            onBack={onLeaveLookup}
+          />
         ) : (
           <NotebookIndex
             notebooks={state.notebooks}
+            follows={state.follows}
             error={state.error}
             onOpen={onOpen}
             onDelete={onDeleteNb}
+            onFork={onFork}
+            onUnfollow={onUnfollow}
           />
         )}
 
         {/* RIGHT RAIL */}
-        <RightRail online={state.online} />
+        <RightRail channelOpen={state.channelOpen} kelvins={state.kelvins} />
 
       </div>
     </div>
   )
 }
 
-function RightRail({ online }: { online: boolean }) {
-  const host = window.location.host || '127.0.0.1:8080'
+// Last 5 base32 chars of a `0v…` desk hash (matches +vats "hash ends in").
+function shortHash(h?: string): string {
+  return h ? h.replace(/\./g, '').slice(-5) : '·····'
+}
+
+function RightRail({ channelOpen, kelvins }: { channelOpen: boolean; kelvins: Kelvins | null }) {
+  const kv = kelvins ?? { zuse: 409, arvo: 235, hoon: 136, nock: 4, port: parseInt(window.location.port) || 80 }
   return (
     <div style={{ position: 'absolute', top: 116, right: 10, bottom: 10, width: 156, display: 'flex', flexDirection: 'column', gap: 7, fontFamily: "'JetBrains Mono', monospace" }}>
-      {/* HOST */}
-      <div style={{ background: '#6c8cff', color: '#000', borderRadius: '18px 0 0 0', padding: '11px 15px', display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <span style={{ fontSize: 9, letterSpacing: '.18em', opacity: .7 }}>HOST</span>
-        <span style={{ fontSize: 14, fontWeight: 700, wordBreak: 'break-all' }}>{host}</span>
+      {/* KELVIN */}
+      <div style={{ background: '#0c0c0e', borderRadius: '18px 0 0 0', border: '1px solid #1a1814', padding: '13px 15px' }}>
+        <div style={{ color: '#6b5a3c', fontSize: 9, letterSpacing: '.22em', marginBottom: 9 }}>KELVIN</div>
+        {([['ZUSE', String(kv.zuse), '#ff8866'], ['ARVO', String(kv.arvo), '#6c8cff'], ['HOON', String(kv.hoon), '#cc88ff'], ['NOCK', String(kv.nock), '#ff9900']] as const).map(([label, val, color]) => (
+          <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', margin: '5px 0' }}>
+            <span style={{ color: '#9a8458', fontSize: 12 }}>{label}</span>
+            <span style={{ color, fontSize: 17, fontWeight: 700 }}>{val}</span>
+          </div>
+        ))}
       </div>
 
-      {/* API */}
+      {/* SHIP PORT */}
+      <div style={{ background: '#6c8cff', color: '#000', padding: '11px 15px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <span style={{ fontSize: 9, letterSpacing: '.18em', opacity: .7 }}>SHIP PORT</span>
+        <span style={{ fontSize: 15, fontWeight: 700 }}>:{kv.port}</span>
+      </div>
+
+      {/* EYRE CHANNEL */}
       <div style={{ background: '#cc88ff', color: '#000', padding: '11px 15px', display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <span style={{ fontSize: 9, letterSpacing: '.18em', opacity: .7 }}>API</span>
+        <span style={{ fontSize: 9, letterSpacing: '.18em', opacity: .7 }}>EYRE CHANNEL</span>
         <span style={{ fontSize: 15, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ width: 8, height: 8, borderRadius: '50%', background: online ? '#143a18' : '#3a1414', animation: online ? 'lcpulse 1.6s infinite' : 'none', display: 'inline-block' }} />
-          {online ? 'ONLINE' : 'OFFLINE'}
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: channelOpen ? '#143a18' : '#3a1414', animation: channelOpen ? 'lcpulse 1.6s infinite' : 'none', display: 'inline-block' }} />
+          :{kv.port} {channelOpen ? 'OPEN' : 'CLOSED'}
         </span>
       </div>
 
-      {/* ROUTES */}
+      {/* MARK */}
       <div style={{ background: '#0c0c0e', border: '1px solid #1a1814', padding: '11px 15px', color: '#5a4a2c', fontSize: 10, lineHeight: 1.5, letterSpacing: '.02em' }}>
-        <div style={{ color: '#6b5a3c', fontSize: 9, letterSpacing: '.2em', marginBottom: 6 }}>ROUTES</div>
-        <div style={{ color: '#9a8458' }}>POST /api/state</div>
-        <div style={{ color: '#9a8458' }}>POST /api/action</div>
-        <div style={{ marginTop: 4, color: '#5a8a5f' }}>201 · SNAPSHOT</div>
+        <div style={{ color: '#6b5a3c', fontSize: 9, letterSpacing: '.2em', marginBottom: 6 }}>MARK</div>
+        <div style={{ color: '#9a8458' }}>%cnb-action ▸ poke</div>
+        <div style={{ color: '#9a8458' }}>%json ▸ fact</div>
+        <div style={{ marginTop: 4, color: '#5a8a5f' }}>SSE · /notebook</div>
       </div>
 
       <div style={{ flex: 1 }} />
 
-      {/* RUNTIME */}
+      {/* DESK HASH */}
       <div style={{ background: '#0c0c0e', border: '1px solid #1a1814', borderRadius: '0 0 0 24px', padding: '13px 15px' }}>
-        <div style={{ color: '#6b5a3c', fontSize: 9, letterSpacing: '.2em', marginBottom: 9 }}>RUNTIME</div>
+        <div style={{ color: '#6b5a3c', fontSize: 9, letterSpacing: '.2em', marginBottom: 9 }}>DESK HASH</div>
         <div style={{ margin: '6px 0' }}>
-          <div style={{ color: '#cc88ff', fontSize: 13, fontWeight: 700 }}>nockvm</div>
-          <div style={{ color: '#6b5a3c', fontSize: 11 }}>out.jam</div>
+          <div style={{ color: '#cc88ff', fontSize: 13, fontWeight: 700 }}>%caderno</div>
+          <div style={{ color: '#6b5a3c', fontSize: 11 }}>{shortHash(kv.caderno_hash)}</div>
         </div>
         <div style={{ margin: '6px 0' }}>
-          <div style={{ color: '#d9a441', fontSize: 13, fontWeight: 700 }}>hoon</div>
-          <div style={{ color: '#6b5a3c', fontSize: 11 }}>in-process</div>
+          <div style={{ color: '#d9a441', fontSize: 13, fontWeight: 700 }}>%base</div>
+          <div style={{ color: '#6b5a3c', fontSize: 11 }}>{shortHash(kv.base_hash)}</div>
         </div>
       </div>
     </div>
