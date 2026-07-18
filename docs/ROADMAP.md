@@ -58,8 +58,11 @@ Scope:
 - `/sur/caderno.hoon` — shared type definitions (cell, notebook, action, update)
 - `/app/caderno.hoon` — Gall agent:
   - Single in-memory notebook (no Clay persistence yet)
-  - Direct `++slap`/`++ream` evaluation against `!>(..add)` standard subject
-    (Phase 0 stopgap; migrates to `%shoe` sessions in Phase 1)
+  - Direct `++slap`/`++ream` evaluation against the `!>(.)` standard subject
+    (Phase 0 stopgap; migrates to `%shoe` sessions in Phase 1). This was
+    `!>(..add)` until it was found to under-provision the subject: `..add`
+    climbs to hoon.hoon's %one chapter core, which cannot see %two, so
+    `++sort`/`++turn`/`++weld` were out of scope for every cell.
   - No cross-cell subject accumulation in Phase 0 — each cell evaluates against
     the base standard library subject. Cells CAN reference names defined earlier
     within the same cell source, but not across cells. Documented limitation.
@@ -126,6 +129,6 @@ session integration, multi-kernel support.
 
 - Exact `%shoe` wire path and poke/watch marks for opening a Dojo session from
   another Gall app (investigate on ~nec in Phase 1)
-- Best initial subject for shoe sessions: Dojo's own initialization vs. `!>(..add)`
+- Best initial subject for shoe sessions: Dojo's own initialization vs. `!>(.)`
 - Rendering: `~(sell ut p.vase) q.vase` vs. `(sell vase)` — verify on ~nec
 - How `%north` and `%jock` expose shoe interfaces (coordinate with ~sigilante)

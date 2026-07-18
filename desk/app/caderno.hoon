@@ -56,9 +56,22 @@
   ^-  @t
   (crip (zing (turn t |=(=tank ~(ram re tank)))))
 
+::  The subject every code cell is evaluated against.
+::
+::  This is `.` and not `..add`, which under-provisions it. hoon.hoon is
+::  a chain of chapter cores composed with `=>`: `++add` lives in %one,
+::  while `++sort`, `++turn` and `++weld` live in %two, which is built on
+::  top of %one. So `..add` climbs to %one, whose context cannot see any
+::  later chapter -- a cell running `(sort ~[3 1 2] lth)` fails with
+::  -find.sort.
+::
+::  `.` here is the enclosing |% (which closes well before the agent core
+::  below), so it captures the helper core, the imports, zuse, lull and
+::  hoon -- the whole standard library, and no agent state or bowl.
+::
 ++  fresh-subject
   ^-  vase
-  !>(..add)
+  !>(.)
 
 ::  Evaluate a Hoon cord against a subject vase.
 ::  Returns the output to show and the new accumulated subject.
