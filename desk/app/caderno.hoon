@@ -936,7 +936,17 @@
         ?~  pending.new-ks
           $(effects t.effects)
         =/  [cid=cell-id src=@t]  u.pending.new-ks
-        =/  joined  (crip (zing (turn accum.new-ks trip)))
+        ::  join accumulated %txt lines with newlines, not run together --
+        ::  `zing` alone concatenates the tapes with no separator, so a
+        ::  multi-line shoe-kernel output (e.g. aviary's %trace) collapsed
+        ::  into one run-on line in the cell's output text.
+        =/  joined
+          =/  lines=(list tape)  (turn accum.new-ks trip)
+          %-  crip
+          |-  ^-  tape
+          ?~  lines  ""
+          ?~  t.lines  i.lines
+          (weld i.lines (weld "\0a" $(lines t.lines)))
         ::  detect Forth error: first accumulated line starts with "! "
         =/  out
           ?~  accum.new-ks  [%text '']
