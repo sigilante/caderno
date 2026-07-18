@@ -113,11 +113,11 @@ Caveats on the caveats:
   outcomes observed.
 - **A legitimately slow cell is killed too.** Raise
   `CADERNO_CELL_TIMEOUT` if that bites.
-- **The denial of service remains.** Anyone who can run a cell can
-  restart the process at will; failure is now loud, bounded and
-  recoverable rather than silent and permanent, which is the difference
-  between unusable and fine-for-a-trusted-user — not between unsafe and
-  safe.
+- **The denial of service remains, by design.** Anyone who can run a
+  cell can restart the process at will. This is intended to run locally,
+  where the person who can type into a cell is the person who owns the
+  process, so a runaway cell costs them a restart and nothing else. Do
+  not expose it publicly without bounding work as well as time.
 - **The first `WATCHDOG_GRACE` seconds after boot are unprobed**, so the
   kernel is not held to the limit while it is still starting up.
 
