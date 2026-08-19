@@ -25,7 +25,19 @@
       published=(set @t)
       follows=(map [who=@p id=@t] notebook)
   ==
-+$  versioned-state  $%([%4 state-4] [%5 state-5])
+::  state-6 gives each notebook its own sole session.  Under state-5 every
+::  notebook sharing a shoe kernel shared one session named %caderno, and so
+::  shared one subject: bindings made in one notebook leaked into the next.
++$  state-6
+  $:  nbs=(map @t notebook)
+      active=@t
+      ksessions=(map @t kernel-session)
+      counter=@ud
+      hoon-subject=vase
+      published=(set @t)
+      follows=(map [who=@p id=@t] notebook)
+  ==
++$  versioned-state  $%([%4 state-4] [%5 state-5] [%6 state-6])
 +$  card  card:agent:gall
 
 ++  find-cell
@@ -106,6 +118,51 @@
   ?>  ?=(^ ns)
   p.n.ns
 
+++  session-name
+  ::  Sole session name for a notebook: caderno-<id> where the notebook id is
+  ::  a valid @ta term, else caderno-<hash of it>.  The name becomes a path
+  ::  element (/sole/<who>/<ses>), so it has to be path-safe.  Locally minted
+  ::  ids always are, but %fork inherits an id from a remote ship, which we
+  ::  do not control.  The caderno- prefix is what the UI filters on to tell
+  ::  our sessions apart from other clients' on the same kernel.
+  |=  id=@t
+  ^-  @ta
+  ?:  ((sane %ta) id)  (rap 3 ~['caderno-' id])
+  (rap 3 ~['caderno-' (scot %uv (end [3 16] (shax id)))])
+::
+++  session-wire  |=(ses=@ta `wire`/caderno/session/[ses])
+++  eval-wire     |=(ses=@ta `wire`/caderno/eval/[ses])
+::
+++  session-by-ses
+  ::  Which notebook owns this sole session?  Signs arrive on a wire keyed by
+  ::  session name, and +session-name is not always invertible, so look it up.
+  |=  [kss=(map @t kernel-session) ses=@ta]
+  ^-  (unit [id=@t ks=kernel-session])
+  =/  l  ~(tap by kss)
+  |-
+  ?~  l  ~
+  ?:  =(ses ses.q.i.l)  `[p.i.l q.i.l]
+  $(l t.l)
+::
+++  running-agents
+  ::  Every running gall agent across all desks.  %ge and %cd are vane scries
+  ::  and always resolve; suspended or unloadable desks are skipped via mule.
+  |=  [our=@p now=@da]
+  ^-  (set @t)
+  =/  all-desks  .^((set desk) %cd (en-beam [[our %$ [%da now]] /]))
+  %-  ~(gas in *(set @t))
+  ^-  (list @t)
+  %-  zing
+  %+  turn  ~(tap in all-desks)
+  |=  =desk
+  ^-  (list @t)
+  =/  res
+    %-  mule
+    |.  .^((set [=dude:gall live=?]) %ge /(scot %p our)/[desk]/(scot %da now)/$)
+  ?:  ?=(%| -.res)  ~
+  %+  murn  ~(tap in p.res)
+  |=([=dude:gall live=?] ?:(live [~ `@t`dude] ~))
+::
 ++  read-seeds
   ::  Load seed notebooks from /seed/<id>.json in this desk (id = filename).
   ::  Demo content lives as data files, not hoon literals; on-init reads them.
@@ -342,7 +399,7 @@
   (json-to-notebook (~(got by m) 'nb'))
 --
 
-=|  state-5
+=|  state-6
 =*  state  -
 ^-  agent:gall
 %-  agent:dbug
@@ -357,10 +414,10 @@
   =?  seeds  =(0 ~(wyt by seeds))
     (~(put by seeds) 'main' [~ %hoon 'untitled'])
   =/  active=@t  ?:((~(has by seeds) 'hs-syntax') 'hs-syntax' (any-key seeds))
-  `this(nbs seeds, active active, ksession ~, counter 100, hoon-subject fresh-subject, published ~, follows ~)
+  `this(nbs seeds, active active, ksessions ~, counter 100, hoon-subject fresh-subject, published ~, follows ~)
 
 ++  on-save
-  !>(`versioned-state`[%5 nbs active ksession counter hoon-subject published follows])
+  !>(`versioned-state`[%6 nbs active ksessions counter hoon-subject published follows])
 
 ++  on-load
   |=  old=vase
@@ -368,22 +425,44 @@
   ::  Always reset hoon-subject: stored vases are stale after kernel upgrades.
   =/  try  (mule |.(!<(versioned-state old)))
   ?.  ?=(%& -.try)
-    `this(nbs (~(put by *(map @t notebook)) 'main' [~ %hoon 'untitled']), active 'main', ksession ~, counter 0, hoon-subject fresh-subject, published ~, follows ~)
-  ::  migrate any prior version up to state-5 (adds empty published/follows)
-  =/  s=state-5
-    ?-  -.p.try
-      %5  +.p.try
-      %4  =/  o=state-4  +.p.try
-          [nbs.o active.o ksession.o counter.o hoon-subject.o ~ ~]
+    `this(nbs (~(put by *(map @t notebook)) 'main' [~ %hoon 'untitled']), active 'main', ksessions ~, counter 0, hoon-subject fresh-subject, published ~, follows ~)
+  ::  Migrate any prior version up to state-6, and collect the leaves needed
+  ::  to drop whatever sessions that version was holding.  Every session goes
+  ::  across an upgrade: a queued %eval-command cannot survive one, and the
+  ::  leave is what makes shoe drop the session (see +on-leave in /lib/shoe),
+  ::  so the next run starts cold instead of inheriting a half-built subject.
+  ::  state-4 and state-5 held a single session on the undifferentiated
+  ::  /caderno/session wire; state-6 holds one per notebook.
+  =/  mig
+    ^-  [state-6 (list card)]
+    ?-    -.p.try
+        %6
+      =/  o=state-6  +.p.try
+      :-  o
+      %+  turn  ~(tap by ksessions.o)
+      |=  [id=@t ks=kernel-session]
+      ^-  card
+      [%pass (session-wire ses.ks) %agent [our.bowl agent.ks] %leave ~]
+    ::
+        %5
+      =/  o=state-5  +.p.try
+      :-  [nbs.o active.o ~ counter.o hoon-subject.o published.o follows.o]
+      ?~  ksession.o  ~
+      ~[[%pass /caderno/session %agent [our.bowl agent.u.ksession.o] %leave ~]]
+    ::
+        %4
+      =/  o=state-4  +.p.try
+      :-  [nbs.o active.o ~ counter.o hoon-subject.o ~ ~]
+      ?~  ksession.o  ~
+      ~[[%pass /caderno/session %agent [our.bowl agent.u.ksession.o] %leave ~]]
     ==
-  =/  cleanup=(list card)
-    ?~  ksession.s  ~
-    ~[[%pass /caderno/session %agent [our.bowl agent.u.ksession.s] %leave ~]]
+  =/  s=state-6            -.mig
+  =/  cleanup=(list card)  +.mig
   :-  cleanup
   %=  this
     nbs           nbs.s
     active        active.s
-    ksession      ~
+    ksessions     ~
     counter       counter.s
     hoon-subject  fresh-subject
     published     published.s
@@ -420,49 +499,83 @@
             (broadcast [%cell-output id out new-count])
             (broadcast [%cell-status id status])
         ==
-      ::  shoe kernel: delegate to session via %eval-command
+      ::  shoe kernel: delegate to this notebook's own sole session
       =/  src  source.u.c
-      =/  ses  `@ta`%caderno
-      ?~  ksession
-        ::  first run: subscribe and queue the command; %eval-command is sent
-        ::  reactively when shoe's initial %pro confirms the session is ready
-        =/  new-ks  ^-  kernel-session
-          :*  agent=kernel.nb
-              ses=ses
-              pending=`[id src]
-              accum=~
-              ready=%.n
-          ==
-        ::  leave then watch: handles stale wire left over from prior on-load
-        =/  leave=card
-          [%pass /caderno/session %agent [our.bowl kernel.nb] %leave ~]
-        =/  watch=card
-          :*  %pass  /caderno/session  %agent
-              [our.bowl kernel.nb]
-              %watch  /sole/(scot %p our.bowl)/caderno
-          ==
-        :_  this(nbs (~(put by nbs) active nb(cells (replace-cell id u.c(exec-count `new-count) cells.nb))), ksession `new-ks, counter new-count)
-        :~  (broadcast [%cell-status id %running])
-            leave
-            watch
-        ==
-      ::  session exists; update the queued command
-      =/  ks  u.ksession
-      =/  new-ks=kernel-session  ks(pending `[id src], accum ~)
-      ::  not yet ready: just queue; %eval-command will fire when %pro arrives
-      ?:  =(%.n ready.ks)
-        :_  this(nbs (~(put by nbs) active nb(cells (replace-cell id u.c(exec-count `new-count) cells.nb))), ksession `new-ks, counter new-count)
-        ~[(broadcast [%cell-status id %running])]
-      ::  ready: poke North with %eval-command immediately
-      =/  eval=card
-        :*  %pass  /caderno/eval  %agent
+      =/  ses  (session-name active)
+      =/  new-nbs
+        %+  ~(put by nbs)  active
+        nb(cells (replace-cell id u.c(exec-count `new-count) cells.nb))
+      =/  running-card  (broadcast [%cell-status id %running])
+      =/  watch-card=card
+        :*  %pass  (session-wire ses)  %agent
             [our.bowl kernel.nb]
-            %poke  %eval-command
-            !>([ses (trip src)])
+            %watch  /sole/(scot %p our.bowl)/[ses]
         ==
-      :_  this(nbs (~(put by nbs) active nb(cells (replace-cell id u.c(exec-count `new-count) cells.nb))), ksession `new-ks, counter new-count)
-      :~  (broadcast [%cell-status id %running])
-          eval
+      =/  cold-ks  ^-  kernel-session
+        :*  agent=kernel.nb
+            ses=ses
+            pending=`[id src]
+            accum=~
+            ready=%.n
+        ==
+      ?~  ks=(~(get by ksessions) active)
+        ::  no session for this notebook: cold start.  the queued command is
+        ::  dispatched when shoe's initial %pro confirms the session is ready.
+        :_  %=  this
+              nbs        new-nbs
+              ksessions  (~(put by ksessions) active cold-ks)
+              counter    new-count
+            ==
+        ~[running-card watch-card]
+      =/  kz=kernel-session  u.ks
+      =/  same-kernel=?  =(agent.kz kernel.nb)
+      ::  Reuse the session if it belongs to the kernel this notebook is set
+      ::  to and has been confirmed ready by a %pro.
+      ::
+      ::  Liveness comes from the subscription, not from a scry.  It is
+      ::  tempting to confirm against the kernel's /x/sole/sessions, but a
+      ::  %gx scry into an agent that does not answer the path blocks, and a
+      ::  block is NOT catchable by mule -- it bails with %need straight
+      ::  through the poke.  Any kernel whose /lib/shoe predates the
+      ::  /x/sole/sessions scry would therefore crash the poke rather than
+      ::  report "no session".  Gall does the same for an agent whose
+      ::  +on-peek crashes, so there is no safe in-agent probe at all.
+      ::
+      ::  The subscription is sufficient anyway: shoe only drops a session on
+      ::  +on-leave, which happens because we sent one or because the agent
+      ::  went away and kicked us, and %kick already clears the record here.
+      ::  The scry's place is the UI, where eyre turns a block into a 404.
+      ?:  &(same-kernel ready.kz)
+        :_  %=  this
+              nbs        new-nbs
+              ksessions  (~(put by ksessions) active kz(pending `[id src], accum ~))
+              counter    new-count
+            ==
+        :~  running-card
+            :*  %pass  (eval-wire ses)  %agent
+                [our.bowl kernel.nb]
+                %poke  %eval-command
+                !>([ses (trip src)])
+            ==
+        ==
+      ?:  &(same-kernel !ready.kz)
+        ::  watch already in flight; only queue.  %pro will dispatch it.
+        :_  %=  this
+              nbs        new-nbs
+              ksessions  (~(put by ksessions) active kz(pending `[id src], accum ~))
+              counter    new-count
+            ==
+        ~[running-card]
+      ::  stale: the kernel changed, or shoe dropped the session.  leave before
+      ::  re-watching so we do not strand it, then start cold.
+      :_  %=  this
+            nbs        new-nbs
+            ksessions  (~(put by ksessions) active cold-ks)
+            counter    new-count
+          ==
+      :~  [%pass (session-wire ses.kz) %agent [our.bowl agent.kz] %leave ~]
+          running-card
+          watch-card
       ==
     ::
         %run-all
@@ -528,14 +641,26 @@
       `this(nbs (~(put by nbs) active new-nb))
     ::
         %set-kernel
-      `this(nbs (~(put by nbs) active nb(kernel kernel.act)))
+      ::  Changing kernel invalidates this notebook's session: its subject
+      ::  belongs to the old kernel.  Leave it so shoe reaps it.
+      =/  new-nbs  (~(put by nbs) active nb(kernel kernel.act))
+      ?~  ks=(~(get by ksessions) active)
+        `this(nbs new-nbs)
+      ?:  =(agent.u.ks kernel.act)
+        `this(nbs new-nbs)
+      :_  this(nbs new-nbs, ksessions (~(del by ksessions) active))
+      ~[[%pass (session-wire ses.u.ks) %agent [our.bowl agent.u.ks] %leave ~]]
     ::
         %reset-subject
+      ::  Resets only the active notebook -- sessions are per-notebook now.
+      ::  For a shoe kernel the leave is the reset: /lib/shoe drops the
+      ::  session on +on-leave, so the next run starts cold.
+      =/  ks  (~(get by ksessions) active)
       =/  cleanup=(list card)
-        ?~  ksession  ~
-        ~[[%pass /caderno/session %agent [our.bowl agent.u.ksession] %leave ~]]
+        ?~  ks  ~
+        ~[[%pass (session-wire ses.u.ks) %agent [our.bowl agent.u.ks] %leave ~]]
       :-  cleanup
-      this(hoon-subject fresh-subject, ksession ~)
+      this(hoon-subject fresh-subject, ksessions (~(del by ksessions) active))
         %set-cell-type
       =/  c  (find-cell id.act cells.nb)
       ?~  c  `this
@@ -587,7 +712,18 @@
       ::  the set, kick its followers, and refresh the catalog for lookers.
       =/  was-pub  (~(has in published) del-id)
       =/  new-pub  (~(del in published) del-id)
-      :_  this(nbs new-nbs, active new-active, published new-pub)
+      ::  a deleted notebook's sole session has nothing left to belong to
+      =/  dks  (~(get by ksessions) del-id)
+      =/  cleanup=(list card)
+        ?~  dks  ~
+        ~[[%pass (session-wire ses.u.dks) %agent [our.bowl agent.u.dks] %leave ~]]
+      :_  %=  this
+            nbs        new-nbs
+            active     new-active
+            published  new-pub
+            ksessions  (~(del by ksessions) del-id)
+          ==
+      %+  weld  cleanup
       %+  weld
         ^-  (list card)
         :~  (broadcast [%nb-list (nb-list-items new-nbs)])
@@ -788,21 +924,7 @@
     ::  in-agent .^ probe is not viable: a scry into a non-shoe agent's absent
     ::  path bails uncatchably (mule can't guard it). Suspended/unloadable desks
     ::  are skipped via mule (%ge/%cd are vane scries and always resolve).
-    =/  all-desks  .^((set desk) %cd (en-beam [[our.bowl %$ [%da now.bowl]] /]))
-    =/  running=(set @t)
-      %-  ~(gas in *(set @t))
-      ^-  (list @t)
-      %-  zing
-      %+  turn  ~(tap in all-desks)
-      |=  =desk
-      ^-  (list @t)
-      =/  res
-        %-  mule
-        |.  .^((set [=dude:gall live=?]) %ge /(scot %p our.bowl)/[desk]/(scot %da now.bowl)/$)
-      ?:  ?=(%| -.res)  ~
-      %+  murn  ~(tap in p.res)
-      |=([=dude:gall live=?] ?:(live [~ `@t`dude] ~))
-    =/  names=(list @t)  (sort ~(tap in running) aor)
+    =/  names=(list @t)  (sort ~(tap in (running-agents our.bowl now.bowl)) aor)
     ``[%json !>(`json`[%a (turn names |=(d=@t [%s d]))])]
       [%x %kelvins ~]
     =/  hoon-kel  +>:..add
@@ -884,29 +1006,48 @@
       :_  this(follows fol)
       ~[(broadcast [%follows (follows-items fol)])]
     ==
-      [%caderno %session ~]
+      [%caderno %session @ ~]
+    =/  ses=@ta  i.t.t.wire
+    =/  found    (session-by-ses ksessions ses)
+    ::  a sign for a session we no longer track -- e.g. the kick that follows
+    ::  a leave we sent during a reset -- has nothing left to update
+    ?~  found  `this
+    =/  nid=@t             id.u.found
+    =/  ks=kernel-session  ks.u.found
+    ::  Whether this session's notebook is the one on screen.  %cell-output
+    ::  and %cell-status carry no notebook id, so the UI applies them to
+    ::  whatever it is showing; a background notebook's results are recorded
+    ::  in state but not broadcast.  Switching to it re-sends its full %state,
+    ::  outputs included, so nothing is lost.
+    =/  vis=?  =(nid active)
     ?+  -.sign  `this
         %watch-ack
       ?~  p.sign  `this
       %-  (slog leaf+"caderno: shoe session failed" u.p.sign)
-      `this(ksession ~)
+      :_  this(ksessions (~(del by ksessions) nid))
+      ?.  vis  ~
+      ?~  pending.ks  ~
+      ~[(broadcast [%cell-status id.u.pending.ks %error])]
         %kick
-      `this(ksession ~)
+      ::  the kernel dropped us; fail any cell that was waiting on it rather
+      ::  than leaving it %running forever
+      :_  this(ksessions (~(del by ksessions) nid))
+      ?.  vis  ~
+      ?~  pending.ks  ~
+      ~[(broadcast [%cell-status id.u.pending.ks %error])]
         %fact
       ?.  =(p.cage.sign %sole-effect)  `this
-      ?~  ksession  `this
-      =/  ks  u.ksession
       =/  effects  (flatten-effects !<(sole-effect q.cage.sign))
       =/  cd=(list card)  ~
       =/  new-ks=kernel-session  ks
-      =/  new-nb=notebook  (need (~(get by nbs) active))
+      =/  new-nb=notebook  (need (~(get by nbs) nid))
       |-
       ?~  effects
         ::  shoe output lands here (async), not in on-poke, so the on-poke
-        ::  follower re-push misses it — push explicitly if active is published.
-        =?  cd  (~(has in published) active)
-          (snoc cd (pub-fact active new-nb))
-        :_  this(ksession `new-ks, nbs (~(put by nbs) active new-nb))
+        ::  follower re-push misses it — push explicitly if nid is published.
+        =?  cd  (~(has in published) nid)
+          (snoc cd (pub-fact nid new-nb))
+        :_  this(ksessions (~(put by ksessions) nid new-ks), nbs (~(put by nbs) nid new-nb))
         cd
       =/  efx  i.effects
       ?+  -.efx  $(effects t.effects)
@@ -923,7 +1064,7 @@
           ::  queued command waiting — dispatch it now
           =/  [cid=cell-id src=@t]  u.pending.new-ks
           =/  eval=card
-            :*  %pass  /caderno/eval  %agent
+            :*  %pass  (eval-wire ses.new-ks)  %agent
                 [our.bowl agent.new-ks]
                 %poke  %eval-command
                 !>([ses.new-ks (trip src)])
@@ -960,7 +1101,8 @@
         =/  upd-nb
           ?~  c  new-nb
           new-nb(cells (replace-cell cid u.c(outputs [out ~]) cells.new-nb))
-        =/  new-cd
+        =/  new-cd=(list card)
+          ?.  vis  ~
           :~  (broadcast [%cell-output cid out exec-ct])
               (broadcast [%cell-status cid %done])
           ==
@@ -972,7 +1114,7 @@
         ==
       ==
     ==
-      [%caderno %eval ~]
+      [%caderno %eval @ ~]
     ?+  -.sign  `this
         %poke-ack
       ?~  p.sign  `this
