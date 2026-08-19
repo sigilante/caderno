@@ -72,7 +72,10 @@
 +$  kernel-session
   $:  agent=@tas
       ses=@ta
+    ::  pending: the cell currently dispatched, awaiting its %pro
+    ::  queue:   cells still to run, dispatched one per %pro (see %run-all)
       pending=(unit [id=cell-id src=@t])
+      queue=(list [id=cell-id src=@t])
       accum=(list @t)
       ready=?
   ==

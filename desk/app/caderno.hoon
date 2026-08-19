@@ -515,6 +515,7 @@
         :*  agent=kernel.nb
             ses=ses
             pending=`[id src]
+            queue=~
             accum=~
             ready=%.n
         ==
@@ -548,7 +549,7 @@
       ?:  &(same-kernel ready.kz)
         :_  %=  this
               nbs        new-nbs
-              ksessions  (~(put by ksessions) active kz(pending `[id src], accum ~))
+              ksessions  (~(put by ksessions) active kz(pending `[id src], queue ~, accum ~))
               counter    new-count
             ==
         :~  running-card
@@ -562,7 +563,7 @@
         ::  watch already in flight; only queue.  %pro will dispatch it.
         :_  %=  this
               nbs        new-nbs
-              ksessions  (~(put by ksessions) active kz(pending `[id src], accum ~))
+              ksessions  (~(put by ksessions) active kz(pending `[id src], queue ~, accum ~))
               counter    new-count
             ==
         ~[running-card]
@@ -581,7 +582,53 @@
         %run-all
       ::  Runs all code cells top-to-bottom with a fresh subject.
       ::  Each cell's result is accumulated so later cells can reference
-      ::  earlier results.  Shoe kernels are async and not supported here.
+      ::  earlier results.
+      ::
+      ::  A shoe kernel cannot be folded over the way the hoon one can: each
+      ::  cell is a round trip, so the run is driven by the session instead.
+      ::  Restart it (leave, then re-watch) so the run starts from a clean
+      ::  subject the way fresh-subject does for hoon, queue every code cell,
+      ::  and let the %pro handler in +on-agent dispatch them one at a time.
+      ::  Like the hoon path, a cell that errors does not stop the run.
+      ?.  =(%hoon kernel.nb)
+        =/  jobs=(list [id=cell-id src=@t])
+          %+  turn  (skim cells.nb |=(c=cell =(%code type.c)))
+          |=(c=cell [id.c source.c])
+        ?~  jobs  `this
+        =/  ses  (session-name active)
+        =/  new-count  +(counter)
+        ::  only the first cell's exec-count is known now; the rest are
+        ::  stamped as each is dispatched
+        =/  new-cells
+          =/  c  (find-cell id.i.jobs cells.nb)
+          ?~  c  cells.nb
+          (replace-cell id.i.jobs u.c(exec-count `new-count) cells.nb)
+        =/  ks  (~(get by ksessions) active)
+        =/  cleanup=(list card)
+          ?~  ks  ~
+          ~[[%pass (session-wire ses.u.ks) %agent [our.bowl agent.u.ks] %leave ~]]
+        :_  %=  this
+              nbs        (~(put by nbs) active nb(cells new-cells))
+              counter    new-count
+              ksessions
+                %+  ~(put by ksessions)  active
+                ^-  kernel-session
+                :*  agent=kernel.nb
+                    ses=ses
+                    pending=`i.jobs
+                    queue=t.jobs
+                    accum=~
+                    ready=%.n
+                ==
+            ==
+        %+  weld  cleanup
+        ^-  (list card)
+        :~  (broadcast [%cell-status id.i.jobs %running])
+            :*  %pass  (session-wire ses)  %agent
+                [our.bowl kernel.nb]
+                %watch  /sole/(scot %p our.bowl)/[ses]
+            ==
+        ==
       =/  code-cells  (skim cells.nb |=(c=cell =(%code type.c)))
       =/  cs=(list cell)   cells.nb
       =/  cd=(list card)   ~
@@ -593,11 +640,7 @@
         cd
       =/  c   i.code-cells
       =/  new-ct  +(ct)
-      =/  res
-        ?:  =(%hoon kernel.nb)
-          (eval-hoon source.c subj)
-        ::  non-hoon kernel: run-all not supported; emit a placeholder error
-        [[%error 'KernelError' 'run-all unsupported for shoe kernels'] subj]
+      =/  res  (eval-hoon source.c subj)
       =/  out  -.res
       =/  new-subj  +.res
       =/  new-cell  c(outputs [out ~], exec-count `new-ct)
@@ -1041,13 +1084,20 @@
       =/  cd=(list card)  ~
       =/  new-ks=kernel-session  ks
       =/  new-nb=notebook  (need (~(get by nbs) nid))
+      ::  a %run-all dispatches the next queued cell from here, so exec-counts
+      ::  are handed out inside this loop
+      =/  ct=@ud  counter
       |-
       ?~  effects
         ::  shoe output lands here (async), not in on-poke, so the on-poke
         ::  follower re-push misses it — push explicitly if nid is published.
         =?  cd  (~(has in published) nid)
           (snoc cd (pub-fact nid new-nb))
-        :_  this(ksessions (~(put by ksessions) nid new-ks), nbs (~(put by nbs) nid new-nb))
+        :_  %=  this
+              ksessions  (~(put by ksessions) nid new-ks)
+              nbs        (~(put by nbs) nid new-nb)
+              counter    ct
+            ==
         cd
       =/  efx  i.effects
       ?+  -.efx  $(effects t.effects)
@@ -1106,11 +1156,40 @@
           :~  (broadcast [%cell-output cid out exec-ct])
               (broadcast [%cell-status cid %done])
           ==
+        ::  %run-all: hand the next queued cell to the same session.  Doing it
+        ::  here, on the finished cell's %pro, is what serialises the run --
+        ::  each cell sees the subject the previous one left behind.
+        ?~  queue.new-ks
+          %=  $
+            effects  t.effects
+            new-ks   new-ks(pending ~, accum ~)
+            new-nb   upd-nb
+            cd       (weld cd new-cd)
+          ==
+        =/  nxt      i.queue.new-ks
+        =/  next-ct  +(ct)
+        =/  nxt-nb
+          =/  qc  (find-cell id.nxt cells.upd-nb)
+          ?~  qc  upd-nb
+          upd-nb(cells (replace-cell id.nxt u.qc(exec-count `next-ct) cells.upd-nb))
+        =/  nxt-cd=(list card)
+          %+  weld
+            ^-  (list card)
+            ?.  vis  ~
+            ~[(broadcast [%cell-status id.nxt %running])]
+          ^-  (list card)
+          :~  :*  %pass  (eval-wire ses.new-ks)  %agent
+                  [our.bowl agent.new-ks]
+                  %poke  %eval-command
+                  !>([ses.new-ks (trip src.nxt)])
+              ==
+          ==
         %=  $
           effects  t.effects
-          new-ks   new-ks(pending ~, accum ~)
-          new-nb   upd-nb
-          cd       (weld cd new-cd)
+          new-ks   new-ks(pending `nxt, queue t.queue.new-ks, accum ~)
+          new-nb   nxt-nb
+          ct       next-ct
+          cd       :(weld cd new-cd nxt-cd)
         ==
       ==
     ==
