@@ -167,13 +167,15 @@ export async function fetchAgents(): Promise<string[]> {
 const KERNEL_BLACKLIST = new Set(['shoe'])
 
 // Sweep for shoe REPL kernels: probe each running agent with the shoe
-// /x/sole/sessions scry (a non-shoe agent 404s → null), keeping those that
-// answer.
+// /x/sole/sessions scry, keeping those that answer 2xx. A non-shoe agent
+// answers non-2xx either way, but which one depends on the agent: 404 if its
+// +on-peek reports the path absent, 500 if the scry blocks (the usual case --
+// `?+ path ~` blocks). fetchSoleSessions tests res.ok, so both read as null.
 //
 // This has to happen in the browser. The same scry from inside the agent
 // blocks on any agent that doesn't answer the path, and a block isn't
 // catchable — it bails with %need through the whole peek. Over HTTP, eyre
-// turns that block into a 404, which is exactly the signal we want.
+// turns that block into a 500 instead, which is a signal we can act on.
 //
 // It costs one request per running agent, which on a real ship is dozens, so
 // don't do it on every page load. The result is cached in the agent; see

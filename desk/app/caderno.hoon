@@ -560,7 +560,8 @@
       ::  The subscription is sufficient anyway: shoe only drops a session on
       ::  +on-leave, which happens because we sent one or because the agent
       ::  went away and kicked us, and %kick already clears the record here.
-      ::  The scry's place is the UI, where eyre turns a block into a 404.
+      ::  The scry's place is the UI, where eyre answers a block with a 500
+    ::  rather than bailing.
       ?:  &(same-kernel ready.kz)
         :_  %=  this
               nbs        new-nbs
@@ -990,8 +991,9 @@
     ``[%json !>([%b (~(has in all-desks) %caderno-log)])]
       [%x %agents ~]
     ::  Every running gall agent across all desks. The UI probes each with the
-    ::  shoe /x/sole/sessions scry (over HTTP, where eyre turns an absent path
-    ::  into a clean 404) to find candidate kernels; %ge is a gall enumeration
+    ::  shoe /x/sole/sessions scry (over HTTP, where a non-answering agent
+    ::  comes back non-2xx instead of bailing) to find candidate kernels;
+    ::  %ge is a gall enumeration
     ::  scry, not reachable from the browser, so it must be surfaced here. An
     ::  in-agent .^ probe is not viable: a scry into a non-shoe agent's absent
     ::  path bails uncatchably (mule can't guard it). Suspended/unloadable desks
@@ -1005,7 +1007,8 @@
     ::  Shoe-ness cannot be determined here.  A %gx scry into an agent that
     ::  does not answer the path blocks, and a block is not catchable by mule
     ::  -- it bails with %need through the whole peek.  So the UI probes over
-    ::  HTTP, where eyre turns the block into a 404, and pokes the result back
+    ::  HTTP, where eyre answers a block with a 500 instead of bailing, and
+    ::  pokes the result back
     ::  with %set-kernels.  That sweep costs one request per running agent, so
     ::  it should happen once and not on every page load; this is the cache.
     ::
