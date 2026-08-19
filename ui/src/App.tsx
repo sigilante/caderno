@@ -265,7 +265,13 @@ export default function App() {
     else if ('published' in upd)     dispatch({ type: 'set-published', published: upd['published'] })
     else if ('follows' in upd)       dispatch({ type: 'set-follows', follows: upd['follows'] })
     else if ('lookup' in upd)        dispatch({ type: 'set-lookup', who: upd['lookup'].who, items: upd['lookup'].items })
-    else if ('kernels' in upd)       dispatch({ type: 'set-kernels', kernels: ['hoon', ...upd['kernels']] })
+    // An empty list means the agent has no cached sweep (first run, or a
+    // %rescan-kernels), not that there are no kernels. Clearing the picker on
+    // it would drop a list we already swept for, so re-sweep instead.
+    else if ('kernels' in upd) {
+      if (upd['kernels'].length > 0) dispatch({ type: 'set-kernels', kernels: ['hoon', ...upd['kernels']] })
+      else loadKernels().then(ks => { if (ks.length > 1) dispatch({ type: 'set-kernels', kernels: ks }) }).catch(() => {})
+    }
   }, [])
 
   useEffect(() => {
