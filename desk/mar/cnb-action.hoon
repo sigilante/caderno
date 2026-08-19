@@ -48,6 +48,14 @@
       [%set-kernel kernel=(so:dejs:format (~(got by p.inner) 'kernel'))]
     ?:  (~(has by obj) 'reset-subject')
       [%reset-subject ~]
+    ?:  (~(has by obj) 'set-kernels')
+      =/  inner  (~(got by obj) 'set-kernels')
+      ?>  ?=([%o *] inner)
+      =/  ids  (~(got by p.inner) 'ids')
+      ?>  ?=([%a *] ids)
+      [%set-kernels ids=(turn p.ids so:dejs:format)]
+    ?:  (~(has by obj) 'rescan-kernels')
+      [%rescan-kernels ~]
     ?:  (~(has by obj) 'set-cell-type')
       =/  inner  (~(got by obj) 'set-cell-type')
       ?>  ?=([%o *] inner)

@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useCallback, useRef } from 'react'
 import {
-  fetchActiveNotebook, fetchKelvins, fetchLogStatus, fetchSoleSessions, discoverKernels, openChannel, closeChannel, actions, ship,
+  fetchActiveNotebook, fetchKelvins, fetchLogStatus, fetchSoleSessions, loadKernels, openChannel, closeChannel, actions, ship,
   type Notebook, type Cell, type Output, type Update, type Kelvins, type SoleSession,
 } from './api'
 import { NotebookIndex } from './components/NotebookIndex'
@@ -265,6 +265,7 @@ export default function App() {
     else if ('published' in upd)     dispatch({ type: 'set-published', published: upd['published'] })
     else if ('follows' in upd)       dispatch({ type: 'set-follows', follows: upd['follows'] })
     else if ('lookup' in upd)        dispatch({ type: 'set-lookup', who: upd['lookup'].who, items: upd['lookup'].items })
+    else if ('kernels' in upd)       dispatch({ type: 'set-kernels', kernels: ['hoon', ...upd['kernels']] })
   }, [])
 
   useEffect(() => {
@@ -281,14 +282,20 @@ export default function App() {
     return () => { closeChannel() }
   }, [handleUpdate])
 
-  // Discover available kernels once: in-process 'hoon' (always present, not an
-  // agent) + running agents that answer the shoe /x/sole/sessions probe. Nothing
-  // is white-listed — a kernel appears only if detected. If discovery yields no
-  // shoe agents (e.g. offline) we keep just 'hoon'; the active notebook's own
-  // kernel stays selectable regardless via kernelList below.
+  // Available kernels: in-process 'hoon' (always present, not an agent) plus
+  // running agents that answer the shoe /x/sole/sessions probe. Nothing is
+  // white-listed — a kernel appears only if detected.
+  //
+  // Normally one request: the agent caches which agents are shoe agents and
+  // filters out any that have since stopped. Only an empty cache triggers the
+  // full per-agent sweep, which then repopulates it. Later %kernels updates
+  // arrive over the subscription, so a rescan in one tab reaches the others.
+  //
+  // If nothing is found (offline, no shoe agents) we keep just 'hoon'; the
+  // active notebook's own kernel stays selectable regardless via kernelList.
   useEffect(() => {
     let cancelled = false
-    discoverKernels()
+    loadKernels()
       .then(kernels => { if (!cancelled && kernels.length > 1) dispatch({ type: 'set-kernels', kernels }) })
       .catch(() => {})
     return () => { cancelled = true }
