@@ -36,6 +36,9 @@
       hoon-subject=vase
       published=(set @t)
       follows=(map [who=@p id=@t] notebook)
+    ::  agents last observed to be shoe agents.  Only the UI can establish
+    ::  this (see /x/kernels), so it is cached here rather than recomputed.
+      kernels=(set @t)
   ==
 +$  versioned-state  $%([%4 state-4] [%5 state-5] [%6 state-6])
 +$  card  card:agent:gall
@@ -144,6 +147,13 @@
   ?:  =(ses ses.q.i.l)  `[p.i.l q.i.l]
   $(l t.l)
 ::
+++  live-kernels
+  ::  cached shoe agents that are still running, sorted
+  |=  [ks=(set @t) our=@p now=@da]
+  ^-  (list @t)
+  =/  live  (running-agents our now)
+  (sort ~(tap in (~(int in ks) live)) aor)
+::
 ++  running-agents
   ::  Every running gall agent across all desks.  %ge and %cd are vane scries
   ::  and always resolve; suspended or unloadable desks are skipped via mule.
@@ -195,6 +205,10 @@
     :-  %o
     %-  ~(gas by *(map @t json))
     ~[['state' [%o (~(gas by *(map @t json)) ~[['id' [%s id.upd]] ['nb' (notebook-to-json nb.upd)]])]]]
+      %kernels
+    :-  %o
+    %-  ~(gas by *(map @t json))
+    ~[['kernels' [%a (turn items.upd |=(k=@t [%s k]))]]]
       %nb-list
     :-  %o
     %-  ~(gas by *(map @t json))
@@ -414,10 +428,10 @@
   =?  seeds  =(0 ~(wyt by seeds))
     (~(put by seeds) 'main' [~ %hoon 'untitled'])
   =/  active=@t  ?:((~(has by seeds) 'hs-syntax') 'hs-syntax' (any-key seeds))
-  `this(nbs seeds, active active, ksessions ~, counter 100, hoon-subject fresh-subject, published ~, follows ~)
+  `this(nbs seeds, active active, ksessions ~, counter 100, hoon-subject fresh-subject, published ~, follows ~, kernels ~)
 
 ++  on-save
-  !>(`versioned-state`[%6 nbs active ksessions counter hoon-subject published follows])
+  !>(`versioned-state`[%6 nbs active ksessions counter hoon-subject published follows kernels])
 
 ++  on-load
   |=  old=vase
@@ -425,7 +439,7 @@
   ::  Always reset hoon-subject: stored vases are stale after kernel upgrades.
   =/  try  (mule |.(!<(versioned-state old)))
   ?.  ?=(%& -.try)
-    `this(nbs (~(put by *(map @t notebook)) 'main' [~ %hoon 'untitled']), active 'main', ksessions ~, counter 0, hoon-subject fresh-subject, published ~, follows ~)
+    `this(nbs (~(put by *(map @t notebook)) 'main' [~ %hoon 'untitled']), active 'main', ksessions ~, counter 0, hoon-subject fresh-subject, published ~, follows ~, kernels ~)
   ::  Migrate any prior version up to state-6, and collect the leaves needed
   ::  to drop whatever sessions that version was holding.  Every session goes
   ::  across an upgrade: a queued %eval-command cannot survive one, and the
@@ -446,13 +460,13 @@
     ::
         %5
       =/  o=state-5  +.p.try
-      :-  [nbs.o active.o ~ counter.o hoon-subject.o published.o follows.o]
+      :-  [nbs.o active.o ~ counter.o hoon-subject.o published.o follows.o ~]
       ?~  ksession.o  ~
       ~[[%pass /caderno/session %agent [our.bowl agent.u.ksession.o] %leave ~]]
     ::
         %4
       =/  o=state-4  +.p.try
-      :-  [nbs.o active.o ~ counter.o hoon-subject.o ~ ~]
+      :-  [nbs.o active.o ~ counter.o hoon-subject.o ~ ~ ~]
       ?~  ksession.o  ~
       ~[[%pass /caderno/session %agent [our.bowl agent.u.ksession.o] %leave ~]]
     ==
@@ -467,6 +481,7 @@
     hoon-subject  fresh-subject
     published     published.s
     follows       follows.s
+    kernels       kernels.s
   ==
 
 ++  on-poke
@@ -545,7 +560,8 @@
       ::  The subscription is sufficient anyway: shoe only drops a session on
       ::  +on-leave, which happens because we sent one or because the agent
       ::  went away and kicked us, and %kick already clears the record here.
-      ::  The scry's place is the UI, where eyre turns a block into a 404.
+      ::  The scry's place is the UI, where eyre answers a block with a 500
+    ::  rather than bailing.
       ?:  &(same-kernel ready.kz)
         :_  %=  this
               nbs        new-nbs
@@ -872,6 +888,17 @@
           (catalog-fact pub nbs)
       ==
     ::
+        %set-kernels
+      ::  result of a UI sweep; see /x/kernels for why the UI has to do it
+      =/  ks  (~(gas in *(set @t)) ids.act)
+      :_  this(kernels ks)
+      ~[(broadcast [%kernels (live-kernels ks our.bowl now.bowl)])]
+    ::
+        %rescan-kernels
+      ::  drop the cache; the UI sees an empty /x/kernels and sweeps again
+      :_  this(kernels ~)
+      ~[(broadcast [%kernels ~])]
+    ::
         %lookup
       ::  leave any prior sub on this wire first, so re-looking-up the same ship
       ::  gets a fresh catalog instead of a duplicate-wire nack.
@@ -929,6 +956,9 @@
         [%give %fact ~ %json !>((update-to-json [%state active nb]))]
         [%give %fact ~ %json !>((update-to-json [%published published]))]
         [%give %fact ~ %json !>((update-to-json [%follows (follows-items follows)]))]
+        :*  %give  %fact  ~  %json
+            !>((update-to-json [%kernels (live-kernels kernels our.bowl now.bowl)]))
+        ==
     ==
     ::  remote follower subscription to a published notebook
       [%published @ ~]
@@ -961,14 +991,31 @@
     ``[%json !>([%b (~(has in all-desks) %caderno-log)])]
       [%x %agents ~]
     ::  Every running gall agent across all desks. The UI probes each with the
-    ::  shoe /x/sole/sessions scry (over HTTP, where eyre turns an absent path
-    ::  into a clean 404) to find candidate kernels; %ge is a gall enumeration
+    ::  shoe /x/sole/sessions scry (over HTTP, where a non-answering agent
+    ::  comes back non-2xx instead of bailing) to find candidate kernels;
+    ::  %ge is a gall enumeration
     ::  scry, not reachable from the browser, so it must be surfaced here. An
     ::  in-agent .^ probe is not viable: a scry into a non-shoe agent's absent
     ::  path bails uncatchably (mule can't guard it). Suspended/unloadable desks
     ::  are skipped via mule (%ge/%cd are vane scries and always resolve).
     =/  names=(list @t)  (sort ~(tap in (running-agents our.bowl now.bowl)) aor)
     ``[%json !>(`json`[%a (turn names |=(d=@t [%s d]))])]
+      [%x %kernels ~]
+    ::  Shoe kernels: agents last seen to answer /x/sole/sessions, minus any
+    ::  that are no longer running.
+    ::
+    ::  Shoe-ness cannot be determined here.  A %gx scry into an agent that
+    ::  does not answer the path blocks, and a block is not catchable by mule
+    ::  -- it bails with %need through the whole peek.  So the UI probes over
+    ::  HTTP, where eyre answers a block with a 500 instead of bailing, and
+    ::  pokes the result back
+    ::  with %set-kernels.  That sweep costs one request per running agent, so
+    ::  it should happen once and not on every page load; this is the cache.
+    ::
+    ::  Liveness is cheap and is not cached: %ge and %cd are vane scries and
+    ::  always resolve, so a kernel that has since been stopped drops out here
+    ::  without needing another sweep.
+    ``[%json !>(`json`[%a (turn (live-kernels kernels our.bowl now.bowl) |=(k=@t [%s k]))])]
       [%x %kelvins ~]
     =/  hoon-kel  +>:..add
     =/  arvo-kel  arvo.arvo

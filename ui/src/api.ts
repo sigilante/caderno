@@ -48,6 +48,7 @@ export type Update =
   | { 'published': string[] }
   | { 'follows': { who: string; id: string; title: string }[] }
   | { 'lookup': { who: string; items: { id: string; title: string }[] } }
+  | { 'kernels': string[] }
 
 // Each openChannel takes a fresh channel id. React StrictMode double-invokes
 // effects in dev (mount, cleanup, mount), so a closeChannel can land while the
@@ -165,13 +166,49 @@ export async function fetchAgents(): Promise<string[]> {
 // %shoe, the shoe library's own example/skeleton agent.
 const KERNEL_BLACKLIST = new Set(['shoe'])
 
-// Discover shoe REPL kernels: probe each running agent with the shoe
-// /x/sole/sessions scry (a non-shoe agent 404s → null), keeping those that
-// answer. The in-process 'hoon' kernel is prepended and is not an agent.
-export async function discoverKernels(): Promise<string[]> {
+// Sweep for shoe REPL kernels: probe each running agent with the shoe
+// /x/sole/sessions scry, keeping those that answer 2xx. A non-shoe agent
+// answers non-2xx either way, but which one depends on the agent: 404 if its
+// +on-peek reports the path absent, 500 if the scry blocks (the usual case --
+// `?+ path ~` blocks). fetchSoleSessions tests res.ok, so both read as null.
+//
+// This has to happen in the browser. The same scry from inside the agent
+// blocks on any agent that doesn't answer the path, and a block isn't
+// catchable — it bails with %need through the whole peek. Over HTTP, eyre
+// turns that block into a 500 instead, which is a signal we can act on.
+//
+// It costs one request per running agent, which on a real ship is dozens, so
+// don't do it on every page load. The result is cached in the agent; see
+// loadKernels.
+export async function sweepKernels(): Promise<string[]> {
   const agents = (await fetchAgents()).filter(a => !KERNEL_BLACKLIST.has(a))
   const flags = await Promise.all(agents.map(a => fetchSoleSessions(a).then(r => r !== null)))
-  const shoe = agents.filter((_, i) => flags[i]).sort()
+  return agents.filter((_, i) => flags[i]).sort()
+}
+
+// The agent's cached sweep result, already filtered to agents still running.
+// One request.
+export async function fetchKernels(): Promise<string[]> {
+  try {
+    const res = await fetch('/~/scry/caderno/kernels.json', { credentials: 'include' })
+    if (!res.ok) return []
+    return res.json()
+  } catch {
+    return []
+  }
+}
+
+// Cache-first kernel list. Falls back to a full sweep only when the agent has
+// nothing cached (first ever load, or after a rescan), and reports the result
+// back so the next load is one request. 'hoon' is in-process, not an agent.
+export async function loadKernels(): Promise<string[]> {
+  let shoe = await fetchKernels()
+  if (shoe.length === 0) {
+    shoe = await sweepKernels()
+    if (shoe.length > 0) {
+      try { await actions.setKernels(shoe) } catch { /* cache is best-effort */ }
+    }
+  }
   return ['hoon', ...shoe]
 }
 
@@ -209,4 +246,7 @@ export const actions = {
   fork: (who: string, id: string) => poke({ 'fork': { who, id } }),
   lookup: (who: string) => poke({ 'lookup': { who } }),
   unlookup: (who: string) => poke({ 'unlookup': { who } }),
+  setKernels: (ids: string[]) => poke({ 'set-kernels': { ids } }),
+  // Drop the cached sweep; the next loadKernels re-probes every agent.
+  rescanKernels: () => poke({ 'rescan-kernels': null }),
 }

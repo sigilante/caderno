@@ -48,6 +48,10 @@
       [%fork who=@p id=@t]                              ::  copy a follow into local nbs
       [%lookup who=@p]                                  ::  browse a ship's catalog
       [%unlookup who=@p]                                ::  stop browsing it
+    ::  kernel discovery.  Only the UI can tell which agents are shoe agents
+    ::  (see /x/kernels in the agent), so it sweeps and reports back here.
+      [%set-kernels ids=(list @t)]                      ::  cache a sweep result
+      [%rescan-kernels ~]                               ::  drop it, forcing a sweep
   ==
 
 +$  update
@@ -66,6 +70,8 @@
     ::  lookup: that catalog relayed to our own UI, tagged with the ship.
       [%published-list items=(list [id=@t title=@t])]
       [%lookup who=@p items=(list [id=@t title=@t])]
+    ::  discovered shoe kernels still running, %hoon not included
+      [%kernels items=(list @t)]
   ==
 
 ::  sole session state for shoe kernel delegation
