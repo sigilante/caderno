@@ -49,12 +49,20 @@ export type Update =
   | { 'follows': { who: string; id: string; title: string }[] }
   | { 'lookup': { who: string; items: { id: string; title: string }[] } }
 
-let channelId = `caderno-${Date.now()}`
+// Each openChannel takes a fresh channel id. React StrictMode double-invokes
+// effects in dev (mount, cleanup, mount), so a closeChannel can land while the
+// first openChannel's subscribe is still in flight. With one shared id that
+// delete kills the channel the second open is about to use, and every later
+// PUT comes back 503 with "no channel to move" in the ship's log — which
+// silently breaks every poke the app makes. Giving each open its own channel
+// means the delete only ever targets the channel being abandoned.
+let chanSeq = 0
+let channelId = `caderno-${Date.now()}-${chanSeq++}`
 let eventSource: EventSource | null = null
 let messageId = 1
 
-async function channelPut(actions: object[]) {
-  await fetch(`/~/channel/${channelId}`, {
+async function channelPut(actions: object[], chan: string = channelId) {
+  await fetch(`/~/channel/${chan}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(actions),
@@ -63,6 +71,8 @@ async function channelPut(actions: object[]) {
 }
 
 export async function openChannel(onUpdate: (upd: Update) => void, onOpen?: () => void) {
+  const mine = `caderno-${Date.now()}-${chanSeq++}`
+  channelId = mine
   // subscribe to /notebook
   await channelPut([{
     id: messageId++,
@@ -70,9 +80,11 @@ export async function openChannel(onUpdate: (upd: Update) => void, onOpen?: () =
     ship,
     app: 'caderno',
     path: '/notebook',
-  }])
+  }], mine)
+  // a newer openChannel superseded us while the subscribe was in flight
+  if (channelId !== mine) return
 
-  eventSource = new EventSource(`/~/channel/${channelId}`, { withCredentials: true })
+  eventSource = new EventSource(`/~/channel/${mine}`, { withCredentials: true })
   if (onOpen) eventSource.onopen = onOpen
   eventSource.onmessage = (e) => {
     try {
@@ -86,7 +98,8 @@ export async function openChannel(onUpdate: (upd: Update) => void, onOpen?: () =
 
 export async function closeChannel() {
   eventSource?.close()
-  await channelPut([{ id: messageId++, action: 'delete' }])
+  eventSource = null
+  await channelPut([{ id: messageId++, action: 'delete' }], channelId)
 }
 
 function mkPoke(data: object) {
@@ -105,13 +118,13 @@ async function poke(data: object) {
 }
 
 export async function fetchActiveNotebook(): Promise<{ id: string; nb: Notebook }> {
-  const res = await fetch('/~/scry/caderno/notebook/json', { credentials: 'include' })
+  const res = await fetch('/~/scry/caderno/notebook.json', { credentials: 'include' })
   return res.json()
 }
 
 export async function fetchLogStatus(): Promise<boolean> {
   try {
-    const res = await fetch('/~/scry/caderno/log-status/json', { credentials: 'include' })
+    const res = await fetch('/~/scry/caderno/log-status.json', { credentials: 'include' })
     if (!res.ok) return false
     return res.json()
   } catch {
@@ -163,7 +176,7 @@ export async function discoverKernels(): Promise<string[]> {
 }
 
 export async function fetchKelvins(): Promise<Kelvins> {
-  const res = await fetch('/~/scry/caderno/kelvins/json', { credentials: 'include' })
+  const res = await fetch('/~/scry/caderno/kelvins.json', { credentials: 'include' })
   return res.json()
 }
 
